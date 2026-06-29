@@ -22,7 +22,7 @@ const schema = z.object({
   sector:         z.string().optional(),
   account_type:   z.string().optional(),
   currency:       z.string().default("USD"),
-  dividend_yield: z.coerce.number().optional(),
+  dividend_yield: z.coerce.number().min(0).optional(),
   annual_dividend: z.coerce.number().optional(),
 });
 
@@ -375,7 +375,7 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs text-gray-500">Dividend Yield (%)</Label>
-                <Input type="number" step="0.001" {...register("dividend_yield")} placeholder="Auto-fetched"
+                <Input type="number" step="0.000001" {...register("dividend_yield")} placeholder="Auto-fetched"
                   className="bg-white border-gray-300 text-gray-900" />
               </div>
               <div className="space-y-1">

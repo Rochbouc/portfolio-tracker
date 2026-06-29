@@ -813,10 +813,18 @@ function DashboardInner() {
     }, 0);
   const totalGain = totalValue - totalCost + currentYearContribs;
   const totalGainPct = (totalCost - currentYearContribs) > 0 ? (totalGain / (totalCost - currentYearContribs)) * 100 : 0;
-  const totalDividendsReceived = dividends.reduce((s, d) => {
-    const stock = stocks.find(st => st.id === d.stock_id);
-    return s + toGlobalCurrency(d.amount || 0, stock?.currency || "USD");
+  // Dividend totals in each currency (never converted at entry, use stored currency)
+  const totalDividendsCAD = dividends.reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    if (cur === "CAD") return s + (d.amount || 0);
+    return s + (d.amount || 0) * USD_CAD; // convert USD to CAD for combined total
   }, 0);
+  const totalDividendsUSD = dividends.reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    if (cur === "USD") return s + (d.amount || 0);
+    return s + (d.amount || 0) / USD_CAD; // convert CAD to USD for combined total
+  }, 0);
+  const totalDividendsReceived = globalCurrency === "CAD" ? totalDividendsCAD : totalDividendsUSD;
   const estAnnualDividends = stocks.reduce((s, st) =>
     s + toGlobalCurrency(parseFloat(st.annual_dividend) || 0, st.currency || "USD"), 0);
   const divStocks = stocks.filter(s => s.dividend_yield);
@@ -873,15 +881,15 @@ function DashboardInner() {
     await loadAll();
   };
   const handleAddDividend = async (data) => {
-    await Dividend.create(data);
-    // Use the account explicitly chosen in the form
     const stock = stocks.find(s => s.id === data.stock_id);
+    // Use stock's native currency — never convert at entry time
+    const cur = data.currency || stock?.currency || "USD";
+    await Dividend.create({ ...data, currency: cur });
     const acct = data.account_type || stock?.account_type || "Unassigned";
-    const cur = stock?.currency || "USD";
     if (data.amount > 0) {
       await adjustCash(acct, cur, parseFloat(data.amount));
     }
-    toast({ title: "Dividend recorded & added to cash" });
+    toast({ title: `Dividend recorded (${cur} $${parseFloat(data.amount).toFixed(2)})` });
     await loadAll();
   };
   const handleDeleteDividend = async (id) => { await Dividend.delete(id); await loadAll(); };
@@ -1230,7 +1238,34 @@ function DashboardInner() {
                     return (
                       <Widget key={w.id} id={w.id} title={w.title} tabId="analytics" defaultSize={w.defaultSize}>
                         {w.id === "perf"       && <PortfolioPerformanceChart stocks={stocks} prices={prices} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />}
-                        {w.id === "sector"     && <Card className="border-0 shadow-none"><CardContent className="pt-4"><div className="space-y-2.5">{secData.map((d,i) => (<div key={d.name} className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm flex-shrink-0" style={{background:colors[i%colors.length]}} /><span className="text-sm text-gray-700 flex-1">{d.name}</span><div className="flex-1 bg-gray-100 rounded-full h-2"><div className="h-2 rounded-full" style={{width:`${(d.value/secTotal)*100}%`,background:colors[i%colors.length]}} /></div><span className="text-sm font-semibold text-gray-700 w-12 text-right">{((d.value/secTotal)*100).toFixed(1)}%</span></div>))}</div></CardContent></Card>}
+                        {w.id === "sector" && (() => {
+                      const { PieChart, Pie, Cell, Tooltip: RTooltip, Legend: RLegend, ResponsiveContainer: RC } = require("recharts");
+                      return (
+                        <Card className="border-0 shadow-none">
+                          <CardContent className="pt-2">
+                            <RC width="100%" height={260}>
+                              <PieChart>
+                                <Pie data={secData} cx="50%" cy="50%" outerRadius={90} dataKey="value" nameKey="name"
+                                  label={({name, percent}) => `${name} ${(percent*100).toFixed(1)}%`} labelLine={false}>
+                                  {secData.map((d,i) => <Cell key={i} fill={colors[i%colors.length]}/>)}
+                                </Pie>
+                                <RTooltip formatter={(v,name) => [fmt(v, globalCurrency), name]}/>
+                              </PieChart>
+                            </RC>
+                            <div className="space-y-1.5 mt-2">
+                              {secData.map((d,i) => (
+                                <div key={d.name} className="flex items-center gap-2">
+                                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{background:colors[i%colors.length]}}/>
+                                  <span className="text-xs text-gray-700 flex-1">{d.name}</span>
+                                  <span className="text-xs font-semibold text-gray-700">{fmt(d.value, globalCurrency)}</span>
+                                  <span className="text-xs text-gray-400 w-10 text-right">{((d.value/secTotal)*100).toFixed(1)}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )
+                    })()}
                         {w.id === "monthly"    && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
                         {w.id === "actual_vs"  && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
                         {w.id === "div_charts" && <DividendCharts dividends={dividends} stocks={stocks} />}

@@ -1,15 +1,24 @@
 import { useState, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
-import { Pencil, Check, X, PiggyBank, Plus, Trash2 } from "lucide-react"
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
+import { Pencil, Check, X, PiggyBank, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const STORAGE_KEY = "historical_dividends_per_stock_v1"
+const STORAGE_KEY = "historical_dividends_per_stock_v2"
 const YEARS = [2018,2019,2020,2021,2022,2023,2024,2025]
 
-// Pre-filled from your spreadsheet data
-const DEFAULT_DATA = {
-  // symbol: { 2018: amount, 2019: amount, ... }
+// Account display config
+const ACCOUNT_CONFIG = {
+  TFSA:   { label: "TFSA",         color: "#10b981", bg: "bg-emerald-50",  badge: "bg-emerald-100 text-emerald-800" },
+  RRSP:   { label: "RRSP",         color: "#3b82f6", bg: "bg-blue-50",     badge: "bg-blue-100 text-blue-800" },
+  FHSA:   { label: "FHSA",         color: "#8b5cf6", bg: "bg-purple-50",   badge: "bg-purple-100 text-purple-800" },
+  Cash:   { label: "Cash",         color: "#f59e0b", bg: "bg-amber-50",    badge: "bg-amber-100 text-amber-800" },
+  Margin: { label: "Margin",       color: "#ef4444", bg: "bg-red-50",      badge: "bg-red-100 text-red-800" },
+  Other:  { label: "Other",        color: "#6b7280", bg: "bg-gray-50",     badge: "bg-gray-100 text-gray-700" },
+}
+
+function getAccountConfig(acct) {
+  return ACCOUNT_CONFIG[acct] || ACCOUNT_CONFIG.Other
 }
 
 function load() {
@@ -51,117 +60,175 @@ function EditableCell({ value, onSave }) {
 }
 
 export default function HistoricalDividends({ dividends = [], stocks = [] }) {
-  const [data,       setData]       = useState(load)
-  const [newSymbol,  setNewSymbol]  = useState("")
-  const [showAdd,    setShowAdd]    = useState(false)
+  const [data,          setData]         = useState(load)
+  const [newSymbol,     setNewSymbol]    = useState("")
+  const [newAccount,    setNewAccount]   = useState("RRSP")
+  const [showAdd,       setShowAdd]      = useState(false)
+  const [collapsed,     setCollapsed]    = useState({})
   const currentYear = new Date().getFullYear()
 
-  function update(symbol, year, amount) {
-    const next = { ...data, [symbol]: { ...(data[symbol]||{}), [year]: amount } }
+  function update(key, year, amount) {
+    // key = "SYMBOL|ACCOUNT"
+    const next = { ...data, [key]: { ...(data[key]||{}), [year]: amount } }
     save(next); setData(next)
   }
 
-  function addStock(sym) {
+  function addStock(sym, acct) {
     const s = sym.trim().toUpperCase()
     if (!s) return
-    if (!data[s]) {
-      const next = { ...data, [s]: {} }
+    const key = `${s}|${acct}`
+    if (!data[key]) {
+      const next = { ...data, [key]: {} }
       save(next); setData(next)
     }
     setNewSymbol(""); setShowAdd(false)
   }
 
-  function removeStock(sym) {
-    if (!confirm(`Remove ${sym} from dividend history?`)) return
+  function removeStock(key) {
+    const [sym, acct] = key.split("|")
+    if (!confirm(`Remove ${sym} (${acct}) from dividend history?`)) return
     const next = { ...data }
-    delete next[sym]
+    delete next[key]
     save(next); setData(next)
   }
 
-  // All symbols: from historical data + from live stocks (that have dividends)
-  const allSymbols = useMemo(() => {
+  function toggleCollapse(acct) {
+    setCollapsed(prev => ({ ...prev, [acct]: !prev[acct] }))
+  }
+
+  // Build stock list: from saved data + from live stocks
+  // Key format: "SYMBOL|ACCOUNT"
+  const stockKeys = useMemo(() => {
     const fromData  = Object.keys(data)
-    const fromStocks = stocks.filter(s => s.shares > 0).map(s => s.symbol)
+    const fromStocks = stocks
+      .filter(s => s.shares > 0)
+      .map(s => `${s.symbol}|${s.account_type || "RRSP"}`)
     return [...new Set([...fromData, ...fromStocks])].sort()
   }, [data, stocks])
 
-  // Current year live dividends per stock
-  const liveBySymbol = useMemo(() => {
+  // Group by account
+  const byAccount = useMemo(() => {
+    const groups = {}
+    stockKeys.forEach(key => {
+      const [sym, acct] = key.split("|")
+      const a = acct || "RRSP"
+      if (!groups[a]) groups[a] = []
+      groups[a].push({ key, sym, acct: a })
+    })
+    return groups
+  }, [stockKeys])
+
+  const accountOrder = Object.keys(byAccount).sort()
+
+  // Current year live dividends per stock key
+  const liveByKey = useMemo(() => {
     const map = {}
     dividends
       .filter(d => new Date(d.date).getFullYear() === currentYear)
       .forEach(d => {
         const stock = stocks.find(s => s.id === d.stock_id)
-        const sym   = stock?.symbol || d.stock_id
-        map[sym] = (map[sym] || 0) + (d.amount || 0)
+        if (!stock) return
+        const key = `${stock.symbol}|${stock.account_type || "RRSP"}`
+        map[key] = (map[key] || 0) + (d.amount || 0)
       })
     return map
   }, [dividends, stocks, currentYear])
 
-  // Yearly totals
+  // Yearly totals overall
   const yearTotals = useMemo(() => {
     const totals = {}
     YEARS.forEach(y => {
-      totals[y] = allSymbols.reduce((s, sym) => s + (data[sym]?.[y] || 0), 0)
+      totals[y] = stockKeys.reduce((s, key) => s + (data[key]?.[y] || 0), 0)
     })
-    totals[currentYear] = Object.values(liveBySymbol).reduce((s,v)=>s+v, 0)
+    totals[currentYear] = Object.values(liveByKey).reduce((s,v)=>s+v, 0)
     return totals
-  }, [data, allSymbols, liveBySymbol, currentYear])
+  }, [data, stockKeys, liveByKey, currentYear])
 
-  const chartData = [
-    ...YEARS.map(y => ({ year: String(y), amount: yearTotals[y] || 0 })),
-    { year: String(currentYear)+" (live)", amount: yearTotals[currentYear] || 0 },
-  ]
+  // Per-account yearly totals
+  const acctYearTotals = useMemo(() => {
+    const totals = {}
+    accountOrder.forEach(acct => {
+      totals[acct] = {}
+      YEARS.forEach(y => {
+        totals[acct][y] = (byAccount[acct]||[]).reduce((s,{key}) => s+(data[key]?.[y]||0), 0)
+      })
+      totals[acct][currentYear] = (byAccount[acct]||[]).reduce((s,{key}) => s+(liveByKey[key]||0), 0)
+    })
+    return totals
+  }, [data, byAccount, liveByKey, currentYear, accountOrder])
 
   const grandTotal = Object.values(yearTotals).reduce((s,v)=>s+v,0)
+
+  // Chart data with account breakdown
+  const chartData = YEARS.map(y => {
+    const pt = { year: String(y) }
+    accountOrder.forEach(acct => {
+      pt[acct] = acctYearTotals[acct]?.[y] || 0
+    })
+    return pt
+  })
+  // Add live current year
+  const livePoint = { year: `${currentYear} (live)` }
+  accountOrder.forEach(acct => { livePoint[acct] = acctYearTotals[acct]?.[currentYear] || 0 })
+  chartData.push(livePoint)
 
   return (
     <div className="space-y-4">
 
-      {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card className="bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1 flex items-center gap-1"><PiggyBank className="h-3.5 w-3.5 text-green-500"/>All-time Dividends</div>
+          <div className="text-xs text-gray-400 mb-1 flex items-center gap-1"><PiggyBank className="h-3.5 w-3.5 text-green-500"/>All-time Total</div>
           <div className="text-xl font-bold text-green-600">{fmt(grandTotal)}</div>
         </Card>
         <Card className="bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">{currentYear} (live from transactions)</div>
+          <div className="text-xs text-gray-400 mb-1">{currentYear} (live)</div>
           <div className="text-xl font-bold text-blue-600">{fmt(yearTotals[currentYear]||0)}</div>
         </Card>
-        <Card className="bg-white p-4">
-          <div className="text-xs text-gray-400 mb-1">Stocks tracked</div>
-          <div className="text-xl font-bold text-gray-900">{allSymbols.length}</div>
-        </Card>
+        {accountOrder.map(acct => {
+          const cfg = getAccountConfig(acct)
+          const acctTotal = YEARS.reduce((s,y)=>s+(acctYearTotals[acct]?.[y]||0),0) + (acctYearTotals[acct]?.[currentYear]||0)
+          return (
+            <Card key={acct} className="bg-white p-4">
+              <div className="text-xs text-gray-400 mb-1 flex items-center gap-1.5">
+                <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded", cfg.badge)}>{acct}</span>
+                all-time
+              </div>
+              <div className="text-lg font-bold" style={{color: cfg.color}}>{fmt(acctTotal)}</div>
+            </Card>
+          )
+        })}
       </div>
 
-      {/* Bar chart */}
+      {/* Stacked bar chart by account */}
       <Card className="bg-white">
-        <CardHeader className="pb-2"><CardTitle className="text-sm">Total Dividends by Year</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Dividends by Year — broken down by account</CardTitle></CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} barCategoryGap="25%">
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false}/>
               <XAxis dataKey="year" tick={{fontSize:10}} axisLine={false} tickLine={false}/>
               <YAxis tick={{fontSize:10}} axisLine={false} tickLine={false} width={60}
                 tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}K`:`$${v}`}/>
-              <Tooltip formatter={v=>[fmt(v),"Total"]}/>
-              <Bar dataKey="amount" fill="#10b981" radius={[3,3,0,0]} maxBarSize={50}
-                label={{position:"top",formatter:v=>v>0?`$${(v/1000).toFixed(1)}K`:"",fontSize:9,fill:"#6b7280"}}/>
+              <Tooltip formatter={(v,name)=>[fmt(v), name]}/>
+              <Legend wrapperStyle={{fontSize:11}}/>
+              {accountOrder.map(acct => (
+                <Bar key={acct} dataKey={acct} stackId="a"
+                  fill={getAccountConfig(acct).color} radius={acct===accountOrder[accountOrder.length-1]?[3,3,0,0]:[0,0,0,0]}
+                  maxBarSize={50}/>
+              ))}
             </BarChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      {/* Per-stock per-year table */}
+      {/* Per-account grouped table */}
       <Card className="bg-white">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
-              <CardTitle className="text-sm">Dividends by Stock by Year</CardTitle>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                Click any cell to enter the dividend amount for that stock/year.
-                {currentYear} column is auto-filled from your recorded transactions.
-              </p>
+              <CardTitle className="text-sm">Dividends by Stock by Year — grouped by account</CardTitle>
+              <p className="text-[11px] text-gray-400 mt-0.5">Click any cell to enter the amount. {currentYear} column is auto-filled from your transactions.</p>
             </div>
             <button onClick={()=>setShowAdd(v=>!v)}
               className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 hover:bg-blue-50">
@@ -169,12 +236,18 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
             </button>
           </div>
           {showAdd && (
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               <input autoFocus value={newSymbol} onChange={e=>setNewSymbol(e.target.value.toUpperCase())}
-                onKeyDown={e=>{ if(e.key==="Enter") addStock(newSymbol); if(e.key==="Escape") setShowAdd(false) }}
-                placeholder="Stock symbol e.g. TD, NVDA..."
-                className="text-sm border border-blue-300 rounded px-2 py-1.5 w-48 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
-              <button onClick={()=>addStock(newSymbol)} className="text-green-600 p-1"><Check className="h-4 w-4"/></button>
+                onKeyDown={e=>{ if(e.key==="Enter") addStock(newSymbol, newAccount); if(e.key==="Escape") setShowAdd(false) }}
+                placeholder="Symbol e.g. TD, NVDA"
+                className="text-sm border border-blue-300 rounded px-2 py-1.5 w-36 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+              <select value={newAccount} onChange={e=>setNewAccount(e.target.value)}
+                className="text-sm border border-blue-300 rounded px-2 py-1.5 focus:outline-none">
+                {Object.keys(ACCOUNT_CONFIG).filter(a=>a!=="Other").map(a=>(
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
+              <button onClick={()=>addStock(newSymbol, newAccount)} className="text-green-600 p-1"><Check className="h-4 w-4"/></button>
               <button onClick={()=>setShowAdd(false)} className="text-gray-400 p-1"><X className="h-4 w-4"/></button>
             </div>
           )}
@@ -184,7 +257,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
             <table className="w-full text-[11px]">
               <thead className="bg-gray-50 border-b sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2 text-left text-gray-500 font-medium sticky left-0 bg-gray-50">Stock</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium sticky left-0 bg-gray-50 min-w-[110px]">Stock</th>
                   {YEARS.map(y => (
                     <th key={y} className="px-2 py-2 text-right text-gray-500 font-medium whitespace-nowrap">{y}</th>
                   ))}
@@ -195,43 +268,84 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
                   <th className="px-2 py-2"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {allSymbols.map(sym => {
-                  const rowTotal = YEARS.reduce((s,y) => s+(data[sym]?.[y]||0), 0) + (liveBySymbol[sym]||0)
-                  return (
-                    <tr key={sym} className="hover:bg-gray-50">
-                      <td className="px-3 py-1.5 font-semibold text-gray-900 sticky left-0 bg-white">{sym}</td>
+              <tbody>
+                {accountOrder.map(acct => {
+                  const cfg = getAccountConfig(acct)
+                  const rows = byAccount[acct] || []
+                  const isCollapsed = collapsed[acct]
+                  const acctTotal = YEARS.reduce((s,y)=>s+(acctYearTotals[acct]?.[y]||0),0)
+                    + (acctYearTotals[acct]?.[currentYear]||0)
+
+                  return [
+                    // Account header row
+                    <tr key={`hdr-${acct}`}
+                      className="cursor-pointer select-none border-t-2 border-gray-200"
+                      style={{background: cfg.color + "18"}}
+                      onClick={()=>toggleCollapse(acct)}>
+                      <td className="px-3 py-2 sticky left-0 font-semibold" style={{background: cfg.color + "18"}}>
+                        <div className="flex items-center gap-1.5">
+                          {isCollapsed
+                            ? <ChevronRight className="h-3.5 w-3.5" style={{color:cfg.color}}/>
+                            : <ChevronDown  className="h-3.5 w-3.5" style={{color:cfg.color}}/>}
+                          <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold", cfg.badge)}>{acct}</span>
+                          <span className="text-gray-500 font-normal">({rows.length} stocks)</span>
+                        </div>
+                      </td>
                       {YEARS.map(y => (
-                        <td key={y} className="px-1 py-0.5">
-                          <EditableCell
-                            value={data[sym]?.[y] || 0}
-                            onSave={v => update(sym, y, v)}
-                          />
+                        <td key={y} className="px-2 py-2 text-right font-semibold text-gray-700">
+                          {acctYearTotals[acct]?.[y] > 0 ? fmt(acctYearTotals[acct][y]) : "—"}
                         </td>
                       ))}
-                      <td className="px-2 py-1.5 text-right text-blue-600 font-medium">
-                        {liveBySymbol[sym] ? fmt(liveBySymbol[sym]) : <span className="text-gray-300">—</span>}
+                      <td className="px-2 py-2 text-right font-semibold text-blue-700">
+                        {acctYearTotals[acct]?.[currentYear] > 0 ? fmt(acctYearTotals[acct][currentYear]) : "—"}
                       </td>
-                      <td className="px-2 py-1.5 text-right font-semibold text-gray-800">
-                        {rowTotal > 0 ? fmt(rowTotal) : <span className="text-gray-300">—</span>}
+                      <td className="px-2 py-2 text-right font-semibold" style={{color:cfg.color}}>
+                        {acctTotal > 0 ? fmt(acctTotal) : "—"}
                       </td>
-                      <td className="px-2 py-1.5">
-                        <button onClick={()=>removeStock(sym)} className="text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 className="h-3.5 w-3.5"/>
-                        </button>
-                      </td>
-                    </tr>
-                  )
+                      <td></td>
+                    </tr>,
+
+                    // Stock rows (collapsible)
+                    ...(!isCollapsed ? rows.map(({key, sym}) => {
+                      const rowTotal = YEARS.reduce((s,y)=>s+(data[key]?.[y]||0),0) + (liveByKey[key]||0)
+                      return (
+                        <tr key={key} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="px-3 py-1.5 sticky left-0 bg-white">
+                            <div className="flex items-center gap-1.5 pl-4">
+                              <span className="font-semibold text-gray-900">{sym}</span>
+                            </div>
+                          </td>
+                          {YEARS.map(y => (
+                            <td key={y} className="px-1 py-0.5">
+                              <EditableCell value={data[key]?.[y]||0} onSave={v=>update(key,y,v)}/>
+                            </td>
+                          ))}
+                          <td className="px-2 py-1.5 text-right text-blue-600 font-medium">
+                            {liveByKey[key] ? fmt(liveByKey[key]) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-semibold text-gray-800">
+                            {rowTotal > 0 ? fmt(rowTotal) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <button onClick={()=>removeStock(key)} className="text-gray-300 hover:text-red-500 transition-colors">
+                              <Trash2 className="h-3.5 w-3.5"/>
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    }) : [])
+                  ]
                 })}
-                {/* Totals row */}
+
+                {/* Grand total row */}
                 <tr className="bg-gray-50 font-semibold border-t-2 border-gray-300">
-                  <td className="px-3 py-2 text-gray-700 sticky left-0 bg-gray-50">Total</td>
+                  <td className="px-3 py-2 text-gray-700 sticky left-0 bg-gray-50">Grand Total</td>
                   {YEARS.map(y => (
                     <td key={y} className="px-2 py-2 text-right text-gray-800">
                       {yearTotals[y] > 0 ? fmt(yearTotals[y]) : "—"}
                     </td>
                   ))}
-                  <td className="px-2 py-2 text-right text-blue-700">{yearTotals[currentYear] > 0 ? fmt(yearTotals[currentYear]) : "—"}</td>
+                  <td className="px-2 py-2 text-right text-blue-700">{yearTotals[currentYear]>0 ? fmt(yearTotals[currentYear]) : "—"}</td>
                   <td className="px-2 py-2 text-right text-green-700">{fmt(grandTotal)}</td>
                   <td></td>
                 </tr>
@@ -239,7 +353,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
             </table>
           </div>
           <div className="px-3 py-2 text-[10px] text-gray-400 border-t">
-            Enter historical yearly dividend totals per stock. The {currentYear} column is automatically populated from your dividend transaction records.
+            Stocks are grouped by account (TFSA, RRSP, etc). Click an account header to collapse/expand it. {currentYear} column is auto-filled from transactions.
           </div>
         </CardContent>
       </Card>
