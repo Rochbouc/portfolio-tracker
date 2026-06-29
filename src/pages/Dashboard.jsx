@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Stock, Transaction, Dividend, CashPosition, adjustCash, setCash, deleteCash } from "@/api/localData";
 import { fetchQuote, searchTickers } from "@/api/stockSearch";
 import { getPaySchedule } from "@/api/dividendData";
