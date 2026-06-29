@@ -27,12 +27,19 @@ function load() {
 }
 function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
 
-function fmt(n) {
+const USD_CAD_RATE = 1.37
+
+function fmt(n, cur="CAD", displayCur="CAD") {
   if (!n && n !== 0) return ""
-  return new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",minimumFractionDigits:2,maximumFractionDigits:2}).format(n)
+  // Convert if needed
+  let val = n
+  if (cur === "USD" && displayCur === "CAD") val = n * USD_CAD_RATE
+  if (cur === "CAD" && displayCur === "USD") val = n / USD_CAD_RATE
+  const currency = displayCur || "CAD"
+  return new Intl.NumberFormat("en-CA",{style:"currency",currency,minimumFractionDigits:2,maximumFractionDigits:2}).format(val)
 }
 
-function EditableCell({ value, onSave }) {
+function EditableCell({ value, onSave, currency="CAD", displayCur="CAD" }) {
   const [editing, setEditing] = useState(false)
   const [draft,   setDraft]   = useState("")
   if (editing) return (
@@ -52,7 +59,7 @@ function EditableCell({ value, onSave }) {
     <div onClick={()=>{setDraft(String(value||""));setEditing(true)}}
       className="cursor-pointer hover:bg-blue-50 rounded px-1 py-0.5 text-right group min-w-[64px] min-h-[22px] flex items-center justify-end gap-0.5">
       <span className={value ? "text-green-700 font-medium" : "text-gray-300 text-[10px]"}>
-        {value ? fmt(value) : "click"}
+        {value ? fmt(value, currency, displayCur) : "click"}
       </span>
       <Pencil className="h-2.5 w-2.5 text-gray-300 opacity-0 group-hover:opacity-100"/>
     </div>
@@ -60,12 +67,26 @@ function EditableCell({ value, onSave }) {
 }
 
 export default function HistoricalDividends({ dividends = [], stocks = [] }) {
+  // Map symbol|account -> currency from live stocks
+  const stockCurrencyMap = useMemo(() => {
+    const m = {}
+    stocks.forEach(s => { m[`${s.symbol}|${s.account_type}`] = s.currency || "CAD" })
+    return m
+  }, [stocks])
   const [data,          setData]         = useState(load)
   const [newSymbol,     setNewSymbol]    = useState("")
   const [newAccount,    setNewAccount]   = useState("RRSP")
   const [showAdd,       setShowAdd]      = useState(false)
   const [collapsed,     setCollapsed]    = useState({})
+  const [displayCur,    setDisplayCur]   = useState("CAD")
+  const USD_CAD = 1.37
   const currentYear = new Date().getFullYear()
+
+  // Get currency for a symbol from live stocks
+  function getStockCurrency(sym, acct) {
+    // Try to find from stocks prop
+    return "USD" // default, overridden by stock data in parent
+  }
 
   function update(key, year, amount) {
     // key = "SYMBOL|ACCOUNT"
@@ -202,7 +223,20 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
 
       {/* Stacked bar chart by account */}
       <Card className="bg-white">
-        <CardHeader className="pb-2"><CardTitle className="text-sm">Dividends by Year — broken down by account</CardTitle></CardHeader>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Dividends by Year — broken down by account</CardTitle>
+            <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+              {["CAD","USD"].map(c => (
+                <button key={c} onClick={()=>setDisplayCur(c)}
+                  className={cn("px-2.5 py-1 font-medium transition-colors",
+                    displayCur===c?"bg-gray-900 text-white":"bg-white text-gray-400 hover:bg-gray-50")}>
+                  {c==="CAD"?"🍁":"🇺🇸"} {c}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} barCategoryGap="25%">
@@ -228,12 +262,27 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <CardTitle className="text-sm">Dividends by Stock by Year — grouped by account</CardTitle>
-              <p className="text-[11px] text-gray-400 mt-0.5">Click any cell to enter the amount. {currentYear} column is auto-filled from your transactions.</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Enter amounts in native currency: CAD for Canadian stocks, USD for US stocks.
+                {currentYear} column auto-filled from transactions.
+              </p>
             </div>
-            <button onClick={()=>setShowAdd(v=>!v)}
-              className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 hover:bg-blue-50">
-              <Plus className="h-3.5 w-3.5"/> Add Stock
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Currency toggle */}
+              <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
+                {["CAD","USD"].map(c => (
+                  <button key={c} onClick={()=>setDisplayCur(c)}
+                    className={cn("px-2.5 py-1 font-medium transition-colors",
+                      displayCur===c?"bg-gray-900 text-white":"bg-white text-gray-400 hover:bg-gray-50")}>
+                    {c==="CAD"?"🍁 CAD":"🇺🇸 USD"}
+                  </button>
+                ))}
+              </div>
+              <button onClick={()=>setShowAdd(v=>!v)}
+                className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 hover:bg-blue-50">
+                <Plus className="h-3.5 w-3.5"/> Add Stock
+              </button>
+            </div>
           </div>
           {showAdd && (
             <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -317,14 +366,19 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
                           </td>
                           {YEARS.map(y => (
                             <td key={y} className="px-1 py-0.5">
-                              <EditableCell value={data[key]?.[y]||0} onSave={v=>update(key,y,v)}/>
+                              <EditableCell
+                                value={data[key]?.[y]||0}
+                                onSave={v=>update(key,y,v)}
+                                currency={stockCurrencyMap[key] || "CAD"}
+                                displayCur={displayCur}
+                              />
                             </td>
                           ))}
                           <td className="px-2 py-1.5 text-right text-blue-600 font-medium">
                             {liveByKey[key] ? fmt(liveByKey[key]) : <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-2 py-1.5 text-right font-semibold text-gray-800">
-                            {rowTotal > 0 ? fmt(rowTotal) : <span className="text-gray-300">—</span>}
+                            {rowTotal > 0 ? fmt(rowTotal, stockCurrencyMap[key]||"CAD", displayCur) : <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-2 py-1.5">
                             <button onClick={()=>removeStock(key)} className="text-gray-300 hover:text-red-500 transition-colors">

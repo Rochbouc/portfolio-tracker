@@ -1,4 +1,9 @@
-import Dashboard from "@/pages/Dashboard";
+import { useState } from "react"
+import Dashboard from "@/pages/Dashboard"
+import Login, { isAuthenticated } from "@/components/auth/Login"
+
 export default function App() {
-  return <Dashboard />;
+  const [authed, setAuthed] = useState(() => isAuthenticated())
+  if (!authed) return <Login onLogin={() => setAuthed(true)} />
+  return <Dashboard />
 }

@@ -33,6 +33,15 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
   const [currency,      setCurrency]      = useState("CAD")
   const [suggestUsed,   setSuggestUsed]   = useState(false)
 
+  // Slow scroll when dialog opens
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => {
+        document.querySelector("[role=dialog]")?.scrollTo({ top: 0, behavior: "smooth" })
+      }, 100)
+    }
+  }, [open])
+
   const selectedStockId = watch("stock_id")
   const selectedStock   = stocks.find(s => s.id === selectedStockId)
 

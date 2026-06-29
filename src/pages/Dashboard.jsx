@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Stock, Transaction, Dividend, CashPosition, adjustCash, setCash, deleteCash } from "@/api/localData";
 import { fetchQuote, searchTickers } from "@/api/stockSearch";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
+import { logout } from "@/components/auth/Login";
 import { ToastProvider, useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -30,7 +31,7 @@ import TFSATracker from "@/components/settings/TFSATracker";
 import YearOverYear from "@/components/analytics/YearOverYear";
 import HistoricalDividends from "@/components/analytics/HistoricalDividends";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend as RLegend } from "recharts";
-import { RefreshCw, Plus, Receipt, Coins, TrendingUp, ChevronDown, ChevronUp, Bell, Briefcase, Wallet, Loader2, Send, Search, DollarSign, Pencil } from "lucide-react";
+import { RefreshCw, Plus, Receipt, Coins, TrendingUp, ChevronDown, ChevronUp, Bell, Briefcase, Wallet, Loader2, Send, Search, DollarSign, Pencil, LogOut, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function fmt(n, currency) {
@@ -712,6 +713,106 @@ function AIAssistantPanel() {
 }
 
 // ── Main Dashboard ─────────────────────────────────────────────────
+// ── Exchange Rate Widget ──────────────────────────────────────────
+function ExchangeRateWidget() {
+  const [rate,    setRate]    = useState(1.37)
+  const [live,    setLive]    = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [lastUpd, setLastUpd] = useState(null)
+  const STORAGE_KEY = "usd_cad_rate_v1"
+
+  useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY))
+      if (saved?.rate) { setRate(saved.rate); setLive(saved.rate); setLastUpd(saved.ts) }
+    } catch {}
+  })
+
+  async function fetchLive() {
+    setLoading(true)
+    try {
+      const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+      for (const proxy of proxies) {
+        try {
+          const res = await fetch(`${proxy}${encodeURIComponent("https://query2.finance.yahoo.com/v8/finance/chart/USDCAD=X?interval=1d&range=1d")}`, { signal: AbortSignal.timeout(6000) })
+          const data = await res.json()
+          const r = data?.chart?.result?.[0]?.meta?.regularMarketPrice
+          if (r && r > 0) {
+            setLive(r); setRate(r); setLastUpd(new Date().toLocaleTimeString())
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ rate: r, ts: new Date().toLocaleTimeString() }))
+            break
+          }
+        } catch {}
+      }
+    } catch {}
+    setLoading(false)
+  }
+
+  const [editMode, setEditMode] = useState(false)
+  const [draft,    setDraft]    = useState("")
+
+  function saveManual() {
+    const n = parseFloat(draft)
+    if (!isNaN(n) && n > 0) {
+      setRate(n); setLive(null)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rate: n, ts: "manual" }))
+    }
+    setEditMode(false)
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs text-gray-400 mb-1">Current Rate</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-gray-900">{rate.toFixed(4)}</span>
+            <span className="text-sm text-gray-500">CAD per USD</span>
+          </div>
+          {lastUpd && <div className="text-[10px] text-gray-400 mt-0.5">{live ? `Live · Updated ${lastUpd}` : `Manual · ${lastUpd}`}</div>}
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-400 mb-1">1 USD =</div>
+          <div className="text-xl font-bold text-blue-600">${rate.toFixed(4)} CAD</div>
+          <div className="text-xs text-gray-400 mt-0.5">1 CAD = ${(1/rate).toFixed(4)} USD</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+        {[100,1000,10000].map(n => (
+          <div key={n} className="bg-gray-50 rounded-lg p-2">
+            <div className="text-gray-400">USD {n.toLocaleString()}</div>
+            <div className="font-semibold text-gray-800">${(n*rate).toLocaleString("en-CA",{maximumFractionDigits:0})} CAD</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={fetchLive} disabled={loading}
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs border border-blue-200 text-blue-600 rounded-lg py-2 hover:bg-blue-50 transition-colors">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading?"animate-spin":""}`}/>
+          {loading ? "Fetching…" : "Get Live Rate"}
+        </button>
+        {editMode ? (
+          <div className="flex-1 flex items-center gap-1">
+            <input autoFocus type="number" step="0.0001" value={draft} onChange={e=>setDraft(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")saveManual();if(e.key==="Escape")setEditMode(false)}}
+              className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            <button onClick={saveManual} className="text-green-500 p-1"><Check className="h-3.5 w-3.5"/></button>
+            <button onClick={()=>setEditMode(false)} className="text-gray-400 p-1"><X className="h-3.5 w-3.5"/></button>
+          </div>
+        ) : (
+          <button onClick={()=>{setDraft(String(rate));setEditMode(true)}}
+            className="flex-1 flex items-center justify-center gap-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg py-2 hover:bg-gray-50 transition-colors">
+            <Pencil className="h-3.5 w-3.5"/> Set Manually
+          </button>
+        )}
+      </div>
+      <p className="text-[10px] text-gray-400">This rate is used for all USD↔CAD conversions in the app. Click "Get Live Rate" to fetch from Yahoo Finance.</p>
+    </div>
+  )
+}
+
 function DashboardInner() {
   const { toast } = useToast();
   const [stocks, setStocks] = useState([]);
@@ -813,18 +914,26 @@ function DashboardInner() {
     }, 0);
   const totalGain = totalValue - totalCost + currentYearContribs;
   const totalGainPct = (totalCost - currentYearContribs) > 0 ? (totalGain / (totalCost - currentYearContribs)) * 100 : 0;
-  // Dividend totals in each currency (never converted at entry, use stored currency)
+  const thisYear = new Date().getFullYear();
+  // All-time dividend totals
   const totalDividendsCAD = dividends.reduce((s, d) => {
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
-    if (cur === "CAD") return s + (d.amount || 0);
-    return s + (d.amount || 0) * USD_CAD; // convert USD to CAD for combined total
+    return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
   }, 0);
   const totalDividendsUSD = dividends.reduce((s, d) => {
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
-    if (cur === "USD") return s + (d.amount || 0);
-    return s + (d.amount || 0) / USD_CAD; // convert CAD to USD for combined total
+    return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
   }, 0);
-  const totalDividendsReceived = globalCurrency === "CAD" ? totalDividendsCAD : totalDividendsUSD;
+  // Current year only (for the card)
+  const thisYearDivsCAD = dividends.filter(d => new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
+  }, 0);
+  const thisYearDivsUSD = dividends.filter(d => new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
+  }, 0);
+  const totalDividendsReceived = globalCurrency === "CAD" ? thisYearDivsCAD : thisYearDivsUSD;
   const estAnnualDividends = stocks.reduce((s, st) =>
     s + toGlobalCurrency(parseFloat(st.annual_dividend) || 0, st.currency || "USD"), 0);
   const divStocks = stocks.filter(s => s.dividend_yield);
@@ -932,6 +1041,10 @@ function DashboardInner() {
             <Button size="sm" onClick={() => { setEditingStock(null); setShowAddStock(true); }} className="gap-1.5">
               <Plus className="h-3.5 w-3.5" /> Add Stock
             </Button>
+            <button onClick={() => { if(confirm("Sign out?")) logout() }}
+              className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Sign out">
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -957,7 +1070,7 @@ function DashboardInner() {
             {[
               { label: "Portfolio Value", value: fmt(totalValue, globalCurrency), sub: <span className={cn("text-xs font-semibold", totalGainPct >= 0 ? "text-green-600" : "text-red-500")}>{totalGainPct >= 0 ? "+" : ""}{totalGainPct.toFixed(2)}%</span>, icon: <Wallet className="h-5 w-5" /> },
               { label: "Total Gain/Loss", value: <span className={totalGain >= 0 ? "text-green-600" : "text-red-500"}>{totalGain >= 0 ? "+" : ""}{fmt(totalGain, globalCurrency)}</span>, sub: null, icon: <TrendingUp className="h-5 w-5" /> },
-              { label: "Dividends Received", value: fmt(totalDividendsReceived, globalCurrency), sub: "All time", icon: <Coins className="h-5 w-5" /> },
+              { label: `Dividends Received ${new Date().getFullYear()}`, value: fmt(totalDividendsReceived, globalCurrency), sub: `All time: ${fmt(globalCurrency==="CAD"?totalDividendsCAD:totalDividendsUSD, globalCurrency)}`, icon: <Coins className="h-5 w-5" /> },
               { label: "Est. Annual Dividends", value: fmt(estAnnualDividends, globalCurrency), sub: avgYield > 0 ? `${avgYield.toFixed(2)}% avg yield` : null, icon: <TrendingUp className="h-5 w-5" /> },
             ].map((s, i) => (
               <Card key={i} className="bg-white">
@@ -1314,11 +1427,13 @@ function DashboardInner() {
                 {/* SETTINGS */}
                 {activeTab === "settings" && (
                   <WidgetGrid tabId="settings" widgets={[
-                    { id:"tfsa",   title:"TFSA Contribution Room", defaultSize:"half" },
-                    { id:"import", title:"Import Stocks",          defaultSize:"half" },
-                    { id:"backup", title:"Data Backup",            defaultSize:"full" },
+                    { id:"fx",     title:"Exchange Rate",             defaultSize:"half" },
+                    { id:"tfsa",   title:"TFSA Contribution Room",    defaultSize:"half" },
+                    { id:"import", title:"Import Stocks",             defaultSize:"half" },
+                    { id:"backup", title:"Data Backup",               defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="settings" defaultSize={w.defaultSize}>
+                      {w.id === "fx" && <ExchangeRateWidget />}
                       {w.id === "tfsa"   && <TFSATracker transactions={transactions} stocks={stocks} />}
                       {w.id === "import" && <ImportStocks onImported={() => loadAll()} />}
                       {w.id === "backup" && <DataBackup onRestored={loadAll} />}
