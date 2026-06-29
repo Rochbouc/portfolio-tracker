@@ -39,6 +39,12 @@ function fmt(n, cur="CAD", displayCur="CAD") {
   return new Intl.NumberFormat("en-CA",{style:"currency",currency,minimumFractionDigits:2,maximumFractionDigits:2}).format(val)
 }
 
+// fmtD: format a value already in displayCur (no conversion)
+function fmtD(n, cur="CAD") {
+  if (!n && n !== 0) return "—"
+  return new Intl.NumberFormat("en-CA",{style:"currency",currency:cur,minimumFractionDigits:2,maximumFractionDigits:2}).format(n)
+}
+
 function EditableCell({ value, onSave, currency="CAD", displayCur="CAD" }) {
   const [editing, setEditing] = useState(false)
   const [draft,   setDraft]   = useState("")
@@ -155,42 +161,77 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
     return map
   }, [dividends, stocks, currentYear])
 
-  // Yearly totals overall
+  // Inline conversion helpers (stable, used inside useMemo)
   const yearTotals = useMemo(() => {
+    const convert = (amount, key) => {
+      const cur = stockCurrencyMap[key] || "USD"
+      if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
+      if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
+      return amount
+    }
+    const convertLive = (amount, key) => {
+      const [sym, acct] = key.split("|")
+      const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
+      const cur = stock?.currency || "USD"
+      if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
+      if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
+      return amount
+    }
     const totals = {}
     YEARS.forEach(y => {
-      totals[y] = stockKeys.reduce((s, key) => s + (data[key]?.[y] || 0), 0)
+      totals[y] = stockKeys.reduce((s, key) => s + convert(data[key]?.[y] || 0, key), 0)
     })
-    totals[currentYear] = Object.values(liveByKey).reduce((s,v)=>s+v, 0)
+    totals[currentYear] = Object.entries(liveByKey).reduce((s, [key, v]) => s + convertLive(v, key), 0)
     return totals
-  }, [data, stockKeys, liveByKey, currentYear])
+  }, [data, stockKeys, liveByKey, currentYear, displayCur, stockCurrencyMap, stocks])
 
-  // Per-account yearly totals
+  // Per-account yearly totals — currency-aware
   const acctYearTotals = useMemo(() => {
+    const convert = (amount, key) => {
+      const cur = stockCurrencyMap[key] || "USD"
+      if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
+      if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
+      return amount
+    }
+    const convertLive = (amount, key) => {
+      const [sym, acct] = key.split("|")
+      const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
+      const cur = stock?.currency || "USD"
+      if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
+      if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
+      return amount
+    }
     const totals = {}
     accountOrder.forEach(acct => {
       totals[acct] = {}
       YEARS.forEach(y => {
-        totals[acct][y] = (byAccount[acct]||[]).reduce((s,{key}) => s+(data[key]?.[y]||0), 0)
+        totals[acct][y] = (byAccount[acct]||[]).reduce((s,{key}) => s + convert(data[key]?.[y]||0, key), 0)
       })
-      totals[acct][currentYear] = (byAccount[acct]||[]).reduce((s,{key}) => s+(liveByKey[key]||0), 0)
+      totals[acct][currentYear] = (byAccount[acct]||[]).reduce((s,{key}) => s + convertLive(liveByKey[key]||0, key), 0)
     })
     return totals
-  }, [data, byAccount, liveByKey, currentYear, accountOrder])
+  }, [data, byAccount, liveByKey, currentYear, accountOrder, displayCur, stockCurrencyMap, stocks])
+
+  // Expose convertLive for use in JSX
+  const toLiveDisplay = (amount, key) => {
+    const [sym, acct] = key.split("|")
+    const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
+    const cur = stock?.currency || "USD"
+    if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
+    if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
+    return amount
+  }
 
   const grandTotal = Object.values(yearTotals).reduce((s,v)=>s+v,0)
 
-  // Chart data with account breakdown
+  // Chart data — already in display currency via acctYearTotals
   const chartData = YEARS.map(y => {
     const pt = { year: String(y) }
-    accountOrder.forEach(acct => {
-      pt[acct] = acctYearTotals[acct]?.[y] || 0
-    })
+    accountOrder.forEach(acct => { pt[acct] = parseFloat((acctYearTotals[acct]?.[y] || 0).toFixed(2)) })
     return pt
   })
-  // Add live current year
   const livePoint = { year: `${currentYear} (live)` }
-  accountOrder.forEach(acct => { livePoint[acct] = acctYearTotals[acct]?.[currentYear] || 0 })
+  accountOrder.forEach(acct => { livePoint[acct] = parseFloat((acctYearTotals[acct]?.[currentYear] || 0).toFixed(2)) })
   chartData.push(livePoint)
 
   return (
@@ -200,11 +241,11 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card className="bg-white p-4">
           <div className="text-xs text-gray-400 mb-1 flex items-center gap-1"><PiggyBank className="h-3.5 w-3.5 text-green-500"/>All-time Total</div>
-          <div className="text-xl font-bold text-green-600">{fmt(grandTotal)}</div>
+          <div className="text-xl font-bold text-green-600">{fmtD(grandTotal)}</div>
         </Card>
         <Card className="bg-white p-4">
           <div className="text-xs text-gray-400 mb-1">{currentYear} (live)</div>
-          <div className="text-xl font-bold text-blue-600">{fmt(yearTotals[currentYear]||0)}</div>
+          <div className="text-xl font-bold text-blue-600">{fmtD(yearTotals[currentYear]||0)}</div>
         </Card>
         {accountOrder.map(acct => {
           const cfg = getAccountConfig(acct)
@@ -213,9 +254,9 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
             <Card key={acct} className="bg-white p-4">
               <div className="text-xs text-gray-400 mb-1 flex items-center gap-1.5">
                 <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded", cfg.badge)}>{acct}</span>
-                all-time
+                all-time {displayCur}
               </div>
-              <div className="text-lg font-bold" style={{color: cfg.color}}>{fmt(acctTotal)}</div>
+              <div className="text-lg font-bold" style={{color: cfg.color}}>{fmtD(acctTotal)}</div>
             </Card>
           )
         })}
@@ -244,7 +285,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
               <XAxis dataKey="year" tick={{fontSize:10}} axisLine={false} tickLine={false}/>
               <YAxis tick={{fontSize:10}} axisLine={false} tickLine={false} width={60}
                 tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}K`:`$${v}`}/>
-              <Tooltip formatter={(v,name)=>[fmt(v), name]}/>
+              <Tooltip formatter={(v,name)=>[fmtD(v, displayCur), name]}/>
               <Legend wrapperStyle={{fontSize:11}}/>
               {accountOrder.map(acct => (
                 <Bar key={acct} dataKey={acct} stackId="a"
@@ -342,14 +383,14 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
                       </td>
                       {YEARS.map(y => (
                         <td key={y} className="px-2 py-2 text-right font-semibold text-gray-700">
-                          {acctYearTotals[acct]?.[y] > 0 ? fmt(acctYearTotals[acct][y]) : "—"}
+                          {acctYearTotals[acct]?.[y] > 0 ? fmtD(acctYearTotals[acct][y], displayCur) : "—"}
                         </td>
                       ))}
                       <td className="px-2 py-2 text-right font-semibold text-blue-700">
-                        {acctYearTotals[acct]?.[currentYear] > 0 ? fmt(acctYearTotals[acct][currentYear]) : "—"}
+                        {acctYearTotals[acct]?.[currentYear] > 0 ? fmtD(acctYearTotals[acct][currentYear], displayCur) : "—"}
                       </td>
                       <td className="px-2 py-2 text-right font-semibold" style={{color:cfg.color}}>
-                        {acctTotal > 0 ? fmt(acctTotal) : "—"}
+                        {acctTotal > 0 ? fmtD(acctTotal, displayCur) : "—"}
                       </td>
                       <td></td>
                     </tr>,
@@ -375,7 +416,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
                             </td>
                           ))}
                           <td className="px-2 py-1.5 text-right text-blue-600 font-medium">
-                            {liveByKey[key] ? fmt(liveByKey[key]) : <span className="text-gray-300">—</span>}
+                            {liveByKey[key] ? fmtD(toLiveDisplay(liveByKey[key], key), displayCur) : <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-2 py-1.5 text-right font-semibold text-gray-800">
                             {rowTotal > 0 ? fmt(rowTotal, stockCurrencyMap[key]||"CAD", displayCur) : <span className="text-gray-300">—</span>}
@@ -396,11 +437,11 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
                   <td className="px-3 py-2 text-gray-700 sticky left-0 bg-gray-50">Grand Total</td>
                   {YEARS.map(y => (
                     <td key={y} className="px-2 py-2 text-right text-gray-800">
-                      {yearTotals[y] > 0 ? fmt(yearTotals[y]) : "—"}
+                      {yearTotals[y] > 0 ? fmtD(yearTotals[y], displayCur) : "—"}
                     </td>
                   ))}
-                  <td className="px-2 py-2 text-right text-blue-700">{yearTotals[currentYear]>0 ? fmt(yearTotals[currentYear]) : "—"}</td>
-                  <td className="px-2 py-2 text-right text-green-700">{fmt(grandTotal)}</td>
+                  <td className="px-2 py-2 text-right text-blue-700">{yearTotals[currentYear]>0 ? fmtD(yearTotals[currentYear], displayCur) : "—"}</td>
+                  <td className="px-2 py-2 text-right text-green-700">{fmtD(grandTotal, displayCur)}</td>
                   <td></td>
                 </tr>
               </tbody>
