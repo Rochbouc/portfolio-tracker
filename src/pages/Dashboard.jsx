@@ -29,7 +29,7 @@ import ImportStocks from "@/components/settings/ImportStocks";
 import TFSATracker from "@/components/settings/TFSATracker";
 import YearOverYear from "@/components/analytics/YearOverYear";
 import HistoricalDividends from "@/components/analytics/HistoricalDividends";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend as RLegend } from "recharts";
 import { RefreshCw, Plus, Receipt, Coins, TrendingUp, ChevronDown, ChevronUp, Bell, Briefcase, Wallet, Loader2, Send, Search, DollarSign, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -1239,19 +1239,18 @@ function DashboardInner() {
                       <Widget key={w.id} id={w.id} title={w.title} tabId="analytics" defaultSize={w.defaultSize}>
                         {w.id === "perf"       && <PortfolioPerformanceChart stocks={stocks} prices={prices} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />}
                         {w.id === "sector" && (() => {
-                      const { PieChart, Pie, Cell, Tooltip: RTooltip, Legend: RLegend, ResponsiveContainer: RC } = require("recharts");
                       return (
                         <Card className="border-0 shadow-none">
                           <CardContent className="pt-2">
-                            <RC width="100%" height={260}>
+                            <ResponsiveContainer width="100%" height={260}>
                               <PieChart>
                                 <Pie data={secData} cx="50%" cy="50%" outerRadius={90} dataKey="value" nameKey="name"
                                   label={({name, percent}) => `${name} ${(percent*100).toFixed(1)}%`} labelLine={false}>
                                   {secData.map((d,i) => <Cell key={i} fill={colors[i%colors.length]}/>)}
                                 </Pie>
-                                <RTooltip formatter={(v,name) => [fmt(v, globalCurrency), name]}/>
+                                <Tooltip formatter={(v,name) => [fmt(v, globalCurrency), name]}/>
                               </PieChart>
-                            </RC>
+                            </ResponsiveContainer>
                             <div className="space-y-1.5 mt-2">
                               {secData.map((d,i) => (
                                 <div key={d.name} className="flex items-center gap-2">
