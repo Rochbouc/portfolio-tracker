@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Stock, Transaction, Dividend, CashPosition, adjustCash, setCash, deleteCash } from "@/api/localData";
 import { fetchQuote, searchTickers } from "@/api/stockSearch";
+import { getPaySchedule } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
 import { logout } from "@/components/auth/Login";
 import { ToastProvider, useToast } from "@/components/ui/toast";
@@ -936,6 +937,67 @@ function DashboardInner() {
   const totalDividendsReceived = globalCurrency === "CAD" ? thisYearDivsCAD : thisYearDivsUSD;
   const estAnnualDividends = stocks.reduce((s, st) =>
     s + toGlobalCurrency(parseFloat(st.annual_dividend) || 0, st.currency || "USD"), 0);
+
+  // ── Pending dividend suggestions ──────────────────────────────────
+  // Finds stocks with a payment due in the past 14 days not yet recorded
+  const pendingDividendSuggestions = useMemo(() => {
+    const today = new Date();
+    const suggestions = [];
+    stocks.forEach(st => {
+      if (!st.shares || st.shares <= 0) return;
+      const annualDiv = parseFloat(st.annual_dividend) || 0;
+      if (annualDiv <= 0) return;
+      const sched      = getPaySchedule(st.symbol);
+      const freq       = sched?.frequency || 4;
+      const payDay     = sched?.payDay || null;
+      const payMonths  = sched?.payMonths || null;
+      const isWeekly   = freq >= 50;
+      const isMonthly  = freq >= 11;
+      const perPayment = annualDiv / freq;
+      if (perPayment <= 0) return;
+
+      // For each of the past 14 days, check if a payment was expected
+      for (let daysAgo = 0; daysAgo <= 14; daysAgo++) {
+        const checkDate = new Date(today);
+        checkDate.setDate(checkDate.getDate() - daysAgo);
+        const dateStr  = checkDate.toISOString().slice(0,10);
+        const monthKey = dateStr.slice(0,7);
+        const mo       = checkDate.getMonth() + 1;
+        const dom      = checkDate.getDate();
+
+        // Is a payment expected on this date?
+        let expected = false;
+        if (isWeekly && checkDate.getDay() === 5) expected = true;  // Friday
+        else if (isMonthly && payDay && dom === payDay) expected = true;
+        else if (isMonthly && !payDay && dom === 15) expected = true;
+        else if (!isWeekly && !isMonthly && payMonths && payMonths.includes(mo) && payDay && dom === payDay) expected = true;
+        else if (!isWeekly && !isMonthly && payMonths && payMonths.includes(mo) && !payDay && dom === 15) expected = true;
+
+        if (!expected) continue;
+
+        // Already recorded for this period?
+        const alreadyRecorded = dividends.some(d => {
+          if (d.stock_id !== st.id) return false;
+          if (isWeekly) return Math.abs(new Date(d.date) - checkDate) < 7 * 86400000;
+          return d.date?.slice(0,7) === monthKey;
+        });
+        if (alreadyRecorded) break;
+
+        suggestions.push({
+          symbol:   st.symbol,
+          name:     st.name || st.symbol,
+          amount:   parseFloat(perPayment.toFixed(2)),
+          date:     dateStr,
+          type:     "projected",
+          stock_id: st.id,
+          daysAgo,
+        });
+        break; // one suggestion per stock
+      }
+    });
+    // Sort by most recent first
+    return suggestions.sort((a,b) => a.daysAgo - b.daysAgo).slice(0, 15);
+  }, [stocks, dividends]);
   const divStocks = stocks.filter(s => s.dividend_yield);
   const avgYield = divStocks.length > 0 ? divStocks.reduce((s, st) => s + (parseFloat(st.dividend_yield) || 0), 0) / divStocks.length : 0;
 
@@ -1458,7 +1520,7 @@ function DashboardInner() {
 
       <AddStockForm open={showAddStock} onOpenChange={v => { if (!v) setEditingStock(null); setShowAddStock(v); }} onSubmit={handleAddStock} editStock={editingStock} />
       <AddTransactionForm open={showAddTx} onOpenChange={setShowAddTx} stocks={stocks} onSubmit={handleAddTransaction} />
-      <AddDividendForm open={showAddDiv} onOpenChange={setShowAddDiv} stocks={stocks} onSubmit={handleAddDividend} />
+      <AddDividendForm open={showAddDiv} onOpenChange={setShowAddDiv} stocks={stocks} onSubmit={handleAddDividend} suggestions={pendingDividendSuggestions} />
       <CashModal
         open={showCashModal}
         onOpenChange={setShowCashModal}

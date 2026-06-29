@@ -111,8 +111,13 @@ const KNOWN_DIVIDENDS = {
   "JEPI":  { rate: 4.20, freq: 12, currency: "USD" },  // JPMorgan Equity Premium Income
   "JEPQ":  { rate: 4.80, freq: 12, currency: "USD" },  // JPMorgan NASDAQ Equity Premium
   "DIVO":  { rate: 1.80, freq: 12, currency: "USD" },  // Amplify Enhanced Dividend Income
-  // SCHD — quarterly
-  "SCHD":  { rate: 2.76, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // quarterly ~26th  // Schwab US Dividend Equity
+  // Schwab ETFs
+  "SCHD":  { rate: 2.76, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Schwab US Dividend Equity — quarterly
+  "SCHP":  { rate: 1.20, freq: 12, currency: "USD", payDay: 1  },  // Schwab U.S. TIPS ETF — monthly
+  "SCHB":  { rate: 1.40, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
+  "SCHX":  { rate: 1.40, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
+  "SCHF":  { rate: 1.60, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
+  "SCHI":  { rate: 1.40, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // quarterly ~26th  // Schwab US Dividend Equity
   // Canadian REITs — monthly distributions
   "REI.UN.TO": { rate: 0.88, freq: 12, currency: "CAD" },  // RioCan
   "REI.UN":    { rate: 0.88, freq: 12, currency: "CAD", payDay:  6 },
