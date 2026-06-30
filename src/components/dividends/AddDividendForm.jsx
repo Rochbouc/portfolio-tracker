@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Calendar, CheckCircle } from "lucide-react"
+import { Loader2, Calendar, CheckCircle, X } from "lucide-react"
 import { getDividendData } from "@/api/dividendData"
 import { getPaySchedule } from "@/api/dividendData"
 import { cn } from "@/lib/utils"
@@ -32,6 +32,34 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
   const [loadingAmount, setLoadingAmount] = useState(false)
   const [currency,      setCurrency]      = useState("CAD")
   const [suggestUsed,   setSuggestUsed]   = useState(false)
+  const [dismissed,     setDismissed]     = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("dismissed_div_suggestions") || "[]")) }
+    catch { return new Set() }
+  })
+
+  function dismissSuggestion(e, sug) {
+    e.stopPropagation()
+    const key = `${sug.symbol}|${sug.date}`
+    const next = new Set(dismissed)
+    next.add(key)
+    setDismissed(next)
+    localStorage.setItem("dismissed_div_suggestions", JSON.stringify([...next]))
+  }
+
+  // Clean up dismissed entries older than 60 days to keep storage tidy
+  useEffect(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 60)
+    const filtered = [...dismissed].filter(key => {
+      const datePart = key.split("|")[1]
+      return datePart && new Date(datePart) >= cutoff
+    })
+    if (filtered.length !== dismissed.size) {
+      const next = new Set(filtered)
+      setDismissed(next)
+      localStorage.setItem("dismissed_div_suggestions", JSON.stringify(filtered))
+    }
+  }, [])
 
   // Slow scroll when dialog opens
   useEffect(() => {
@@ -96,9 +124,10 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
     if (!suggestions || suggestions.length === 0) return []
     return suggestions
       .filter(s => s.type === "projected")
+      .filter(s => !dismissed.has(`${s.symbol}|${s.date}`))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 5)
-  }, [suggestions])
+  }, [suggestions, dismissed])
 
   function applySuggestion(sug) {
     const stock = stocks.find(s => s.symbol === sug.symbol)
@@ -139,16 +168,23 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
               {upcomingSuggestions.map((sug, i) => {
                 const stock = stocks.find(s => s.symbol === sug.symbol)
                 return (
-                  <button key={i} type="button"
-                    onClick={() => applySuggestion(sug)}
-                    className="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-50 hover:border-blue-300 transition-colors text-xs">
-                    <div>
-                      <span className="font-semibold text-gray-900">{sug.symbol}</span>
-                      <span className="text-gray-400 ml-2">{stock?.account_type}</span>
-                      <span className="text-gray-400 ml-2">{sug.date}</span>
-                    </div>
-                    <span className="font-semibold text-green-600">${sug.amount.toFixed(2)} {stock?.currency || "USD"}</span>
-                  </button>
+                  <div key={i} className="flex items-center gap-1">
+                    <button type="button"
+                      onClick={() => applySuggestion(sug)}
+                      className="flex-1 text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-50 hover:border-blue-300 transition-colors text-xs">
+                      <div>
+                        <span className="font-semibold text-gray-900">{sug.symbol}</span>
+                        <span className="text-gray-400 ml-2">{stock?.account_type}</span>
+                        <span className="text-gray-400 ml-2">{sug.date}</span>
+                      </div>
+                      <span className="font-semibold text-green-600">${sug.amount.toFixed(2)} {stock?.currency || "USD"}</span>
+                    </button>
+                    <button type="button" onClick={e => dismissSuggestion(e, sug)}
+                      title="Already entered — remove from list"
+                      className="flex-shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 )
               })}
             </div>

@@ -103,6 +103,7 @@ const KNOWN_DIVIDENDS = {
   "YMAG":  { rate: 2.80, freq: 52, currency: "USD" },  // YieldMax Mag7 — WEEKLY
   "MSFO":  { rate: 3.20, freq: 52, currency: "USD" },  // YieldMax MSFT — WEEKLY
   "NVDY":  { rate: 4.00, freq: 52, currency: "USD" },  // YieldMax NVDA — WEEKLY
+  "NVDA":  { rate: 0.04, freq: 4,  currency: "USD", payDay: 2, payMonths: [3,6,9,12] },  // NVIDIA quarterly
   "AMZY":  { rate: 3.60, freq: 52, currency: "USD" },  // YieldMax AMZN — WEEKLY
   "GOOGY": { rate: 3.00, freq: 52, currency: "USD" },  // YieldMax GOOGL — WEEKLY
   "XYLD":  { rate: 3.60, freq: 12, currency: "USD" },  // Global X S&P 500 Covered Call
