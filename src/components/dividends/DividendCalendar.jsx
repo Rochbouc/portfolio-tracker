@@ -4,7 +4,13 @@ import { Calendar, Loader2, RefreshCw } from "lucide-react"
 import { Stock } from "@/api/localData"
 import { getDividendDataBatch, getPaySchedule } from "@/api/dividendData"
 
-export default function DividendCalendar({ stocks = [], dividends = [] }) {
+export default function DividendCalendar({ stocks = [], dividends = [], globalCurrency = "CAD" }) {
+  const USD_CAD = 1.37
+  const convertAmt = (amount, currency) => {
+    if (globalCurrency === "CAD" && currency === "USD") return amount * USD_CAD
+    if (globalCurrency === "USD" && currency === "CAD") return amount / USD_CAD
+    return amount
+  }
   const [enriched, setEnriched] = useState([])
   const [loading,  setLoading]  = useState(false)
   const [status,   setStatus]   = useState("")
@@ -165,10 +171,10 @@ export default function DividendCalendar({ stocks = [], dividends = [] }) {
   })
 
   const sortedKeys = Object.keys(projected).sort()
-  const total12m   = Object.values(projected).flat().reduce((s, p) => s + p.amount, 0)
+  const total12m   = Object.values(projected).flat().reduce((s, p) => s + convertAmt(p.amount, p.currency||"USD"), 0)
   const divStocks  = enriched.filter(s => s._annualTotal > 0)
 
-  const fmtAmt = n => "$" + (n || 0).toFixed(2)
+  const fmtAmt = n => (globalCurrency==="CAD"?"C$":"US$") + (n || 0).toFixed(2)
   const monthLabel = key => {
     const [y, m] = key.split("-")
     return new Date(parseInt(y), parseInt(m)-1, 1)
@@ -214,7 +220,7 @@ export default function DividendCalendar({ stocks = [], dividends = [] }) {
             <div className="divide-y">
               {sortedKeys.map(key => {
                 const payments   = projected[key]
-                const monthTotal = payments.reduce((s, p) => s + p.amount, 0)
+                const monthTotal = payments.reduce((s, p) => s + convertAmt(p.amount, p.currency||"USD"), 0)
                 const symbols    = [...new Set(payments.map(p => p.symbol))].join(", ")
                 return (
                   <div key={key} className="px-4 py-2.5">

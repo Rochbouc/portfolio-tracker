@@ -64,7 +64,7 @@ function buildSchedule(dividends, stocks, divDataBySymbol) {
   dividends.forEach(d => {
     const stock = stocks.find(s => s.id === d.stock_id)
     if (!stock || !d.date) return
-    events.push({ id:`a_${d.id}`, date:d.date, symbol:stock.symbol, name:stock.name||stock.symbol, amount:d.amount||0, type:"actual", stock })
+    events.push({ id:`a_${d.id}`, date:d.date, symbol:stock.symbol, name:stock.name||stock.symbol, amount:d.amount||0, type:"actual", stock, currency:d.currency||stock.currency||"USD" })
   })
 
   // Projected future dividends
@@ -144,6 +144,7 @@ function buildSchedule(dividends, stocks, divDataBySymbol) {
           amount: amtPer,
           type:   "projected",
           stock,
+          currency: stock.currency || "USD",
         })
       }
 
@@ -215,7 +216,13 @@ function EventChip({ e }) {
 }
 
 // ── Main component ────────────────────────────────────────────────
-export default function DividendCalendarView({ dividends=[], stocks=[] }) {
+export default function DividendCalendarView({ dividends=[], stocks=[], globalCurrency="CAD" }) {
+  const USD_CAD = 1.37
+  const convertAmt = (amount, currency) => {
+    if (globalCurrency === "CAD" && currency === "USD") return amount * USD_CAD
+    if (globalCurrency === "USD" && currency === "CAD") return amount / USD_CAD
+    return amount
+  }
   const [viewMode,     setViewMode]    = useState("month")
   const [currentDate,  setCurrentDate] = useState(new Date())
   const [divData,      setDivData]     = useState({})
@@ -267,11 +274,11 @@ export default function DividendCalendarView({ dividends=[], stocks=[] }) {
   const weekDays  = getWeekDays(currentDate)
   const viewDates = (viewMode==="month"?monthDays:weekDays).map(toDateStr)
 
-  const viewTotal = viewDates.reduce((s,d)=>s+(eventsByDate[d]||[]).reduce((ss,e)=>ss+e.amount,0),0)
+  const viewTotal = viewDates.reduce((s,d)=>s+(eventsByDate[d]||[]).reduce((ss,e)=>ss+convertAmt(e.amount,e.currency||"USD"),0),0)
 
   const next12Total = allEvents
     .filter(e=>{ const d=new Date(e.date); return d>=today && d<=new Date(today.getFullYear(),today.getMonth()+12,1) })
-    .reduce((s,e)=>s+e.amount,0)
+    .reduce((s,e)=>s+convertAmt(e.amount,e.currency||"USD"),0)
 
   const headerLabel = viewMode==="month"
     ? `${MONTH_NAMES[month]} ${year}`
@@ -292,7 +299,7 @@ export default function DividendCalendarView({ dividends=[], stocks=[] }) {
           <div className="flex items-center gap-2">
             {next12Total > 0 && (
               <span className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 font-medium">
-                Next 12mo: ${next12Total.toFixed(2)}
+                Next 12mo: {globalCurrency==="CAD"?"C":"US"}${next12Total.toFixed(2)}
               </span>
             )}
             <button onClick={loadDivData} disabled={loading} title="Refresh" className="text-gray-400 hover:text-gray-600 p-1 rounded">
@@ -322,7 +329,7 @@ export default function DividendCalendarView({ dividends=[], stocks=[] }) {
 
         {viewTotal > 0 && (
           <div className="text-xs text-blue-700 text-center mt-0.5 font-medium">
-            {viewMode==="month"?"This month":"This week"}: <strong>${viewTotal.toFixed(2)}</strong>
+            {viewMode==="month"?"This month":"This week"}: <strong>{globalCurrency==="CAD"?"C":"US"}${viewTotal.toFixed(2)}</strong>
           </div>
         )}
 
@@ -354,7 +361,7 @@ export default function DividendCalendarView({ dividends=[], stocks=[] }) {
                 const events = eventsByDate[dStr] || []
                 const isCur  = day.getMonth()===month
                 const isToday = dStr===todayStr
-                const dayTotal = events.reduce((s,e)=>s+e.amount,0)
+                const dayTotal = events.reduce((s,e)=>s+convertAmt(e.amount,e.currency||"USD"),0)
                 const MAX_CHIPS = 3
                 const shown  = events.slice(0, MAX_CHIPS)
                 const hidden = events.length - MAX_CHIPS
@@ -406,7 +413,7 @@ export default function DividendCalendarView({ dividends=[], stocks=[] }) {
               const dStr   = toDateStr(day)
               const events = eventsByDate[dStr] || []
               const isToday = dStr===todayStr
-              const dayTotal = events.reduce((s,e)=>s+e.amount,0)
+              const dayTotal = events.reduce((s,e)=>s+convertAmt(e.amount,e.currency||"USD"),0)
               return (
                 <div key={i} className={cn(
                   "rounded-xl border flex flex-col min-h-[140px]",

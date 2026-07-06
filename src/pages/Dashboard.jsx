@@ -1378,7 +1378,7 @@ function DashboardInner() {
                       {w.id === "monthly"   && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
                       {w.id === "actual_vs" && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
                       {w.id === "charts"    && <DividendCharts dividends={dividends} stocks={stocks} />}
-                      {w.id === "calendar"  && <DividendCalendar stocks={stocks} dividends={dividends} />}
+                      {w.id === "calendar"  && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
                       {w.id === "list"      && <DividendList dividends={dividends} stocks={stocks} onDelete={handleDeleteDividend} onEdit={handleEditDividend} />}
                     </Widget>
                   )} />
@@ -1443,13 +1443,13 @@ function DashboardInner() {
                         {w.id === "monthly"    && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
                         {w.id === "actual_vs"  && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
                         {w.id === "div_charts" && <DividendCharts dividends={dividends} stocks={stocks} />}
-                        {w.id === "calendar"   && <DividendCalendar stocks={stocks} dividends={dividends} />}
+                        {w.id === "calendar"   && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
                         {w.id === "accsummary" && <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />}
                         {w.id === "projection" && <ProjectionAt60 stocks={stocks} prices={prices} />}
                         {w.id === "closed"     && <ClosedPositions transactions={transactions} dividends={dividends} stocks={stocks} />}
                         {w.id === "backup"     && <DataBackup onRestored={loadAll} />}
                         {w.id === "yoy"        && <YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />}
-                        {w.id === "divcalview" && <DividendCalendarView dividends={dividends} stocks={stocks} />}
+                        {w.id === "divcalview" && <DividendCalendarView dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
                       </Widget>
                     );
                   }} />
@@ -1471,7 +1471,7 @@ function DashboardInner() {
                     { id:"calview", title:"Dividend Calendar", defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="divcalendar" defaultSize="full">
-                      <DividendCalendarView dividends={dividends} stocks={stocks} />
+                      <DividendCalendarView dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />
                     </Widget>
                   )} />
                 )}
@@ -1510,7 +1510,7 @@ function DashboardInner() {
           {/* Sidebar */}
           <div className="w-72 flex-shrink-0 space-y-3 hidden lg:block">
             <PriceAlertsPanel />
-            <DividendCalendar stocks={stocks} dividends={dividends} />
+            <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />
             <BuyOpportunitiesPanel />
             <AISentimentPanel />
             <AIAssistantPanel />

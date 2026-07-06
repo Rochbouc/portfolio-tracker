@@ -206,6 +206,58 @@ const KNOWN_DIVIDENDS = {
   "POW.TO":  { rate: 2.40, freq: 4,  currency: "CAD" },
   "SU.TO":   { rate: 2.20, freq: 4, currency: "CAD", payDay: 25, payMonths: [3,6,9,12] },
   "CNQ.TO":  { rate: 4.00, freq: 4, currency: "CAD", payDay: 15, payMonths: [1,4,7,10] },
+  // ── Your holdings — plain symbols (no .TO suffix) ──────────────────
+  "TRP":   { rate: 3.72,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [1,4,7,10] },
+  "ENB":   { rate: 3.77,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [3,6,9,12] },
+  "TD":    { rate: 4.08,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [1,4,7,10] },
+  "MFC":   { rate: 1.60,  freq: 4,  currency: "CAD", payDay: 19, payMonths: [3,6,9,12] },
+  "RY":    { rate: 5.72,  freq: 4,  currency: "CAD", payDay: 24, payMonths: [2,5,8,11] },
+  "SU":    { rate: 2.20,  freq: 4,  currency: "CAD", payDay: 25, payMonths: [3,6,9,12] },
+  "FTS":   { rate: 2.36,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [3,6,9,12] },
+  "CNQ":   { rate: 4.00,  freq: 4,  currency: "CAD", payDay: 15, payMonths: [1,4,7,10] },
+  "CNR":   { rate: 3.24,  freq: 4,  currency: "CAD", payDay: 31, payMonths: [3,6,9,12] },
+  "BNS":   { rate: 4.24,  freq: 4,  currency: "CAD", payDay: 27, payMonths: [1,4,7,10] },
+  "BMO":   { rate: 5.84,  freq: 4,  currency: "CAD", payDay: 26, payMonths: [2,5,8,11] },
+  "CU":    { rate: 1.78,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [1,4,7,10] },
+  "BN":    { rate: 0.76,  freq: 4,  currency: "CAD", payDay: 28, payMonths: [3,6,9,12] },
+  "DOL":   { rate: 0.92,  freq: 4,  currency: "CAD", payDay:  5, payMonths: [2,5,8,11] },
+  "VFV":   { rate: 2.40,  freq: 12, currency: "CAD", payDay: 25 },
+  "XIC":   { rate: 0.80,  freq: 12, currency: "CAD", payDay: 22 },
+  "XEQT":  { rate: 1.20,  freq: 12, currency: "CAD", payDay: 22 },
+  "XEF":   { rate: 1.40,  freq: 12, currency: "CAD", payDay: 22 },
+  "XUS":   { rate: 1.20,  freq: 12, currency: "CAD", payDay: 22 },
+  "XETM":  { rate: 1.00,  freq: 12, currency: "CAD", payDay: 22 },
+  "AZN":   { rate: 3.00,  freq: 2,  currency: "USD", payDay: 15, payMonths: [3,9] },
+  "LLY":   { rate: 5.40,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
+  "ABBV":  { rate: 6.20,  freq: 4,  currency: "USD", payDay: 15, payMonths: [2,5,8,11] },
+  "COST":  { rate: 4.60,  freq: 4,  currency: "USD", payDay: 12, payMonths: [2,5,8,11] },
+  "MSFT":  { rate: 3.32,  freq: 4,  currency: "USD", payDay:  8, payMonths: [3,6,9,12] },
+  "AAPL":  { rate: 1.00,  freq: 4,  currency: "USD", payDay: 15, payMonths: [2,5,8,11] },
+  "MA":    { rate: 2.64,  freq: 4,  currency: "USD", payDay:  9, payMonths: [2,5,8,11] },
+  "V":     { rate: 2.34,  freq: 4,  currency: "USD", payDay:  5, payMonths: [3,6,9,12] },
+  "T":     { rate: 1.11,  freq: 4,  currency: "USD", payDay:  1, payMonths: [2,5,8,11] },
+  "XOM":   { rate: 3.84,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
+  "RTX":   { rate: 2.60,  freq: 4,  currency: "USD", payDay: 19, payMonths: [1,4,7,10] },
+  "PEP":   { rate: 5.42,  freq: 4,  currency: "USD", payDay:  5, payMonths: [1,4,7,10] },
+  "AVGO":  { rate: 21.00, freq: 4,  currency: "USD", payDay: 29, payMonths: [3,6,9,12] },
+  "GOOGL": { rate: 0.80,  freq: 4,  currency: "USD", payDay: 17, payMonths: [3,6,9,12] },
+  "META":  { rate: 2.00,  freq: 4,  currency: "USD", payDay: 26, payMonths: [3,6,9,12] },
+  "PLTR":  { rate: 0, freq: 0, currency: "USD" },
+  "AMD":   { rate: 0, freq: 0, currency: "USD" },
+  "NFLX":  { rate: 0, freq: 0, currency: "USD" },
+  "ADBE":  { rate: 0, freq: 0, currency: "USD" },
+  "SHOP":  { rate: 0, freq: 0, currency: "CAD" },
+  "CELH":  { rate: 0, freq: 0, currency: "USD" },
+  "PANW":  { rate: 0, freq: 0, currency: "USD" },
+  "AMZN":  { rate: 0, freq: 0, currency: "USD" },
+  "SPCX":  { rate: 0, freq: 0, currency: "USD" },
+  "SETM":  { rate: 0, freq: 0, currency: "USD" },
+  "SHLD":  { rate: 0, freq: 0, currency: "USD" },
+  "SOBO":  { rate: 0, freq: 0, currency: "CAD" },
+  "BBD.A": { rate: 0, freq: 0, currency: "CAD" },
+  "PWR":   { rate: 0, freq: 0, currency: "CAD" },
+  "GRB":   { rate: 0, freq: 0, currency: "CAD" },
+
 };
 
 // ── Fetch from Yahoo Finance v8 chart ─────────────────────────────
@@ -283,6 +335,7 @@ Use frequency: 12=monthly, 4=quarterly, 2=semi-annual, 1=annual. Use 0 if no div
 
 // ── Main export: get dividend info for a stock ─────────────────────
 // Returns { annualRatePerShare, yieldDecimal, frequency, source }
+
 // ── Quick lookup: get payMonths + payDay for a symbol (no network) ─
 export function getPaySchedule(symbol) {
   const sym = (symbol || "").toUpperCase()
