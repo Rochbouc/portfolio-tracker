@@ -86,7 +86,9 @@ function buildProjected(enrichedStocks, dividends) {
         const last = hist[hist.length-1]
         next = new Date(last.getFullYear(), last.getMonth() + moStep, payDay)
         while (next <= now) next = new Date(next.getFullYear(), next.getMonth() + moStep, payDay)
-      } else if (freq >= 11) {
+      // Start from THIS month if pay day hasn't passed yet, else next month
+      const thisMonthPay = new Date(now.getFullYear(), now.getMonth(), payDay)
+      next = thisMonthPay > now ? thisMonthPay : new Date(now.getFullYear(), now.getMonth() + 1, payDay)
         next = new Date(now.getFullYear(), now.getMonth() + 1, payDay)
       } else {
         // quarterly fallback — spread across different quarters

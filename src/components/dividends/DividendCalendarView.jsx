@@ -108,7 +108,9 @@ function buildSchedule(dividends, stocks, divDataBySymbol) {
       next = new Date(now)
       next.setDate(next.getDate() + ((targetDow - next.getDay() + 7) % 7 || 7))
     } else if (freq >= 11) {
-      // Monthly: use known pay day
+      // Start from THIS month if pay day hasn't passed yet, else next month
+      const thisMonthPay = new Date(now.getFullYear(), now.getMonth(), payDay)
+      next = thisMonthPay > now ? thisMonthPay : new Date(now.getFullYear(), now.getMonth() + 1, payDay)
       next = new Date(now.getFullYear(), now.getMonth() + 1, payDay)
     } else {
       // Quarterly: use known pay day in correct quarter month

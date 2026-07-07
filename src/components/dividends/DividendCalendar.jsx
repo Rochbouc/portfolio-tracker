@@ -136,7 +136,7 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
       // Use known payment months — no history yet, place in correct months
       for (let offset = 0; offset <= 13; offset++) {
         const checkDate = new Date(now.getFullYear(), now.getMonth() + offset, payDay)
-        if (checkDate <= now) continue
+        if (checkDate < new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3)) continue  // allow recent past payments
         if (checkDate >= cutoff) break
         const mo = checkDate.getMonth() + 1  // 1-12
         if (payMonths.includes(mo)) {
@@ -152,7 +152,9 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
         next = new Date(last.getFullYear(), last.getMonth() + moStep, payDay)
         while (next <= now) next = new Date(next.getFullYear(), next.getMonth() + moStep, payDay)
       } else if (isMonthly) {
-        next = new Date(now.getFullYear(), now.getMonth() + 1, payDay)
+        // Start from THIS month if pay day hasn't passed yet, else next month
+        const thisMonthPay = new Date(now.getFullYear(), now.getMonth(), payDay)
+        next = thisMonthPay > now ? thisMonthPay : new Date(now.getFullYear(), now.getMonth() + 1, payDay)
       } else {
         // Fallback quarterly — but use payDay on the right quarter months
         const qm = [0, 3, 6, 9]
