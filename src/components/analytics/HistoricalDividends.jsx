@@ -72,7 +72,7 @@ function EditableCell({ value, onSave, currency="CAD", displayCur="CAD" }) {
   )
 }
 
-export default function HistoricalDividends({ dividends = [], stocks = [] }) {
+export default function HistoricalDividends({ dividends = [], stocks = [], globalCurrency = "CAD" }) {
   // Map symbol|account -> currency from live stocks
   const stockCurrencyMap = useMemo(() => {
     const m = {}
@@ -84,7 +84,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
   const [newAccount,    setNewAccount]   = useState("RRSP")
   const [showAdd,       setShowAdd]      = useState(false)
   const [collapsed,     setCollapsed]    = useState({})
-  const [displayCur,    setDisplayCur]   = useState("CAD")
+  const displayCur = globalCurrency  // use master switch
   const USD_CAD = 1.37
   const currentYear = new Date().getFullYear()
 
@@ -267,15 +267,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm">Dividends by Year — broken down by account</CardTitle>
-            <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
-              {["CAD","USD"].map(c => (
-                <button key={c} onClick={()=>setDisplayCur(c)}
-                  className={cn("px-2.5 py-1 font-medium transition-colors",
-                    displayCur===c?"bg-gray-900 text-white":"bg-white text-gray-400 hover:bg-gray-50")}>
-                  {c==="CAD"?"🍁":"🇺🇸"} {c}
-                </button>
-              ))}
-            </div>
+
           </div>
         </CardHeader>
         <CardContent>
@@ -309,16 +301,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [] }) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {/* Currency toggle */}
-              <div className="flex rounded border border-gray-200 overflow-hidden text-xs">
-                {["CAD","USD"].map(c => (
-                  <button key={c} onClick={()=>setDisplayCur(c)}
-                    className={cn("px-2.5 py-1 font-medium transition-colors",
-                      displayCur===c?"bg-gray-900 text-white":"bg-white text-gray-400 hover:bg-gray-50")}>
-                    {c==="CAD"?"🍁 CAD":"🇺🇸 USD"}
-                  </button>
-                ))}
-              </div>
+
               <button onClick={()=>setShowAdd(v=>!v)}
                 className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded px-2.5 py-1.5 hover:bg-blue-50">
                 <Plus className="h-3.5 w-3.5"/> Add Stock

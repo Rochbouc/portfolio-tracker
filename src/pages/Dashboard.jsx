@@ -860,7 +860,15 @@ function DashboardInner() {
 
   const loadAll = useCallback(async () => {
     const [s, t, d, cp] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list()]);
-    setStocks(s); setTransactions(t); setDividends(d); setCashPositions(cp);
+    // Backfill currency on old dividend records saved without it — persist fix
+    const fixed = await Promise.all(d.map(async div => {
+      if (div.currency) return div;
+      const stock = s.find(st => st.id === div.stock_id);
+      const cur = stock?.currency || "USD";
+      await Dividend.update(div.id, { ...div, currency: cur }).catch(() => {});
+      return { ...div, currency: cur };
+    }));
+    setStocks(s); setTransactions(t); setDividends(fixed); setCashPositions(cp);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -1103,6 +1111,16 @@ function DashboardInner() {
             <Button size="sm" onClick={() => { setEditingStock(null); setShowAddStock(true); }} className="gap-1.5">
               <Plus className="h-3.5 w-3.5" /> Add Stock
             </Button>
+            {/* Master currency switch */}
+            <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
+              {["CAD","USD"].map(cur => (
+                <button key={cur} onClick={() => setGlobalCurrency(cur)}
+                  className={cn("px-2.5 py-1.5 font-semibold transition-colors",
+                    globalCurrency === cur ? "bg-gray-900 text-white" : "bg-white text-gray-400 hover:bg-gray-50")}>
+                  {cur === "CAD" ? "🍁 CAD" : "🇺🇸 USD"}
+                </button>
+              ))}
+            </div>
             <button onClick={() => { if(confirm("Sign out?")) logout() }}
               className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Sign out">
               <LogOut className="h-4 w-4" />
@@ -1114,20 +1132,8 @@ function DashboardInner() {
       <div className="max-w-screen-xl mx-auto px-4 py-4">
         <PortfolioPerformanceChart stocks={stocks} prices={prices} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />
 
-        {/* Stats cards with USD/CAD toggle */}
+        {/* Stats cards */}
         <div className="mb-4">
-          <div className="flex items-center justify-end mb-2 gap-2">
-            <span className="text-xs text-gray-400">Display totals in:</span>
-            <div className="flex rounded-md border border-gray-200 overflow-hidden text-xs">
-              {["USD","CAD"].map(cur => (
-                <button key={cur} onClick={() => setGlobalCurrency(cur)}
-                  className={cn("px-3 py-1 font-semibold transition-colors",
-                    globalCurrency === cur ? "bg-gray-900 text-white" : "bg-white text-gray-400 hover:bg-gray-50")}>
-                  {cur === "USD" ? "🇺🇸 USD" : "🍁 CAD"}
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
               { label: "Portfolio Value", value: fmt(totalValue, globalCurrency), sub: <span className={cn("text-xs font-semibold", totalGainPct >= 0 ? "text-green-600" : "text-red-500")}>{totalGainPct >= 0 ? "+" : ""}{totalGainPct.toFixed(2)}%</span>, icon: <Wallet className="h-5 w-5" /> },
@@ -1379,7 +1385,7 @@ function DashboardInner() {
                       {w.id === "actual_vs" && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
                       {w.id === "charts"    && <DividendCharts dividends={dividends} stocks={stocks} />}
                       {w.id === "calendar"  && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
-                      {w.id === "list"      && <DividendList dividends={dividends} stocks={stocks} onDelete={handleDeleteDividend} onEdit={handleEditDividend} />}
+                      {w.id === "list"      && <DividendList dividends={dividends} stocks={stocks} onDelete={handleDeleteDividend} onEdit={handleEditDividend} globalCurrency={globalCurrency} />}
                     </Widget>
                   )} />
                 )}
@@ -1483,7 +1489,7 @@ function DashboardInner() {
 
                 {/* DIVIDEND HISTORY */}
                 {activeTab === "histdiv" && (
-                  <HistoricalDividends dividends={dividends} stocks={stocks} />
+                  <HistoricalDividends dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />
                 )}
 
                 {/* SETTINGS */}

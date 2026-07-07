@@ -79,18 +79,38 @@ function EditDividendDialog({ dividend, stocks, open, onOpenChange, onSave }) {
   )
 }
 
-export default function DividendList({ dividends = [], stocks = [], onDelete, onEdit }) {
+export default function DividendList({ dividends = [], stocks = [], onDelete, onEdit, globalCurrency = "CAD" }) {
   const [editingDiv, setEditingDiv] = useState(null)
+  const USD_CAD = 1.37
 
-  const fmt    = n  => new Intl.NumberFormat("en-CA", { style:"currency", currency:"USD" }).format(n || 0)
+  // Get stock's native currency from the record (d.currency) or from the stock object
+  const getStockCurrency = (d) => d.currency || stocks.find(s => s.id === d.stock_id)?.currency || "USD"
+
+  // Format amount in its native currency (never convert — show as entered)
+  const fmtNative = (d) => {
+    const cur = getStockCurrency(d)
+    return new Intl.NumberFormat("en-CA", { style:"currency", currency: cur }).format(d.amount || 0)
+  }
+
+  // Convert to globalCurrency for the total
+  const toGlobal = (d) => {
+    const cur = getStockCurrency(d)
+    const amt = d.amount || 0
+    if (cur === globalCurrency) return amt
+    if (globalCurrency === "CAD" && cur === "USD") return amt * USD_CAD
+    if (globalCurrency === "USD" && cur === "CAD") return amt / USD_CAD
+    return amt
+  }
+
+  const fmtGlobal = n => new Intl.NumberFormat("en-CA", { style:"currency", currency: globalCurrency }).format(n || 0)
   const getSym = id => stocks.find(s => s.id === id)?.symbol || id
-  const total  = dividends.reduce((s, d) => s + (d.amount || 0), 0)
+  const total  = dividends.reduce((s, d) => s + toGlobal(d), 0)
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="text-base">Dividend History</CardTitle>
-        <span className="text-sm font-semibold text-green-600">Total: {fmt(total)}</span>
+        <span className="text-sm font-semibold text-green-600">Total: {fmtGlobal(total)}</span>
       </CardHeader>
       <CardContent className="p-0">
         {dividends.length === 0 ? (
@@ -116,7 +136,7 @@ export default function DividendList({ dividends = [], stocks = [], onDelete, on
                 </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-green-600">{fmt(d.amount)}</span>
+                  <span className="font-semibold text-green-600">{fmtNative(d)}</span>
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-blue-500 hover:bg-blue-50"
                     onClick={() => setEditingDiv(d)}>
                     <Pencil className="h-3.5 w-3.5" />
