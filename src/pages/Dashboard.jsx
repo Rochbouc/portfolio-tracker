@@ -1382,8 +1382,8 @@ function DashboardInner() {
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="dividends" defaultSize={w.defaultSize}>
                       {w.id === "monthly"   && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
-                      {w.id === "actual_vs" && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
-                      {w.id === "charts"    && <DividendCharts dividends={dividends} stocks={stocks} />}
+                      {w.id === "actual_vs" && <DividendActualVsPredicted dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
+                      {w.id === "charts"    && <DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
                       {w.id === "calendar"  && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
                       {w.id === "list"      && <DividendList dividends={dividends} stocks={stocks} onDelete={handleDeleteDividend} onEdit={handleEditDividend} globalCurrency={globalCurrency} />}
                     </Widget>
@@ -1447,8 +1447,8 @@ function DashboardInner() {
                       )
                     })()}
                         {w.id === "monthly"    && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
-                        {w.id === "actual_vs"  && <DividendActualVsPredicted dividends={dividends} stocks={stocks} />}
-                        {w.id === "div_charts" && <DividendCharts dividends={dividends} stocks={stocks} />}
+                        {w.id === "actual_vs"  && <DividendActualVsPredicted dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
+                        {w.id === "div_charts" && <DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
                         {w.id === "calendar"   && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
                         {w.id === "accsummary" && <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />}
                         {w.id === "projection" && <ProjectionAt60 stocks={stocks} prices={prices} />}
@@ -1526,7 +1526,7 @@ function DashboardInner() {
 
       <AddStockForm open={showAddStock} onOpenChange={v => { if (!v) setEditingStock(null); setShowAddStock(v); }} onSubmit={handleAddStock} editStock={editingStock} />
       <AddTransactionForm open={showAddTx} onOpenChange={setShowAddTx} stocks={stocks} onSubmit={handleAddTransaction} />
-      <AddDividendForm open={showAddDiv} onOpenChange={setShowAddDiv} stocks={stocks} onSubmit={handleAddDividend} suggestions={pendingDividendSuggestions} />
+      <AddDividendForm open={showAddDiv} onOpenChange={setShowAddDiv} stocks={stocks} onSubmit={handleAddDividend} suggestions={pendingDividendSuggestions} transactions={transactions} />
       <CashModal
         open={showCashModal}
         onOpenChange={setShowCashModal}

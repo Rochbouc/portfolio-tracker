@@ -124,7 +124,7 @@ function loadChartJs() {
   return chartJsPromise
 }
 
-export default function DividendActualVsPredicted({ stocks = [], dividends = [] }) {
+export default function DividendActualVsPredicted({ stocks = [], dividends = [], globalCurrency = "CAD" }) {
   const [enrichedStocks, setEnrichedStocks] = useState([])
   const [loading, setLoading]               = useState(false)
   const [viewMode, setViewMode]             = useState("12mo")
@@ -188,7 +188,13 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [] 
     dividends.forEach(d => {
       const dt  = new Date(d.date)
       const key = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`
-      map[key] = (map[key] || 0) + (d.amount || 0)
+      const stock = stocks.find(s => s.id === d.stock_id)
+      const cur = d.currency || stock?.currency || "USD"
+      const USD_CAD = 1.37
+      const converted = (globalCurrency === "CAD" && cur === "USD") ? (d.amount||0) * USD_CAD
+        : (globalCurrency === "USD" && cur === "CAD") ? (d.amount||0) / USD_CAD
+        : (d.amount||0)
+      map[key] = (map[key] || 0) + converted
     })
     return map
   }, [dividends])

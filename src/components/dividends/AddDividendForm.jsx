@@ -20,7 +20,7 @@ const schema = z.object({
   notes:        z.string().optional(),
 })
 
-export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks = [], suggestions = [] }) {
+export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks = [], suggestions = [], transactions = [] }) {
   const {
     register, handleSubmit, setValue, watch, reset, control,
     formState: { errors, isSubmitting }
@@ -75,10 +75,20 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
 
   // Auto-fill account + currency when stock changes
   useEffect(() => {
-    if (!selectedStock) return
-    setValue("account_type", selectedStock.account_type || "")
-    setCurrency(selectedStock.currency || "CAD")
-  }, [selectedStockId, stocks, setValue])
+    if (!selectedStockId) return
+    // Try active stock first
+    if (selectedStock) {
+      setValue("account_type", selectedStock.account_type || "")
+      setCurrency(selectedStock.currency || "CAD")
+      return
+    }
+    // Fall back to sold stock
+    const sold = soldStocks.find(s => s.id === selectedStockId)
+    if (sold) {
+      setValue("account_type", sold.account || "")
+      setCurrency(sold.currency || "USD")
+    }
+  }, [selectedStockId, stocks, soldStocks, setValue])
 
   // Auto-suggest amount from dividend calendar data
   useEffect(() => {
@@ -99,6 +109,35 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
       fetch()
     }
   }, [selectedStockId])
+
+  // Derive sold/closed stocks from transactions
+  const soldStocks = useMemo(() => {
+    // Group transactions by stockId
+    const byStock = {}
+    transactions.forEach(t => {
+      if (!byStock[t.stock_id]) byStock[t.stock_id] = []
+      byStock[t.stock_id].push(t)
+    })
+    const result = []
+    Object.entries(byStock).forEach(([stockId, txns]) => {
+      const totalBought = txns.filter(t=>t.type==="buy").reduce((s,t)=>s+t.shares,0)
+      const totalSold   = txns.filter(t=>t.type==="sell").reduce((s,t)=>s+t.shares,0)
+      // Fully or mostly sold
+      if (totalSold > 0 && totalSold >= totalBought * 0.99) {
+        const t = txns[0]
+        // Get symbol/account from first transaction or from stocks list (may be deleted)
+        const liveStock = stocks.find(s => s.id === stockId)
+        const symbol    = liveStock?.symbol || t.symbol || stockId
+        const account   = liveStock?.account_type || t.account_type || ""
+        const currency  = liveStock?.currency || t.currency || "USD"
+        // Don't duplicate active stocks
+        if (!stocks.find(s => s.id === stockId && (s.shares||0) > 0)) {
+          result.push({ id: stockId, symbol, account, currency, sold: true })
+        }
+      }
+    })
+    return result.sort((a,b) => a.symbol.localeCompare(b.symbol))
+  }, [stocks, transactions])
 
   // Stock options sorted alphabetically with account shown
   const stockOptions = useMemo(() => {
@@ -202,6 +241,7 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
                   <SelectValue placeholder="Select stock" />
                 </SelectTrigger>
                 <SelectContent>
+                  {/* Active stocks */}
                   {stockOptions.map(s => (
                     <SelectItem key={s.id} value={s.id}>
                       <span className="font-medium">{s.symbol}</span>
@@ -209,6 +249,21 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
                       <span className="ml-2 text-xs text-gray-400">{s.currency}</span>
                     </SelectItem>
                   ))}
+                  {/* Sold stocks divider */}
+                  {soldStocks.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-t mt-1 pt-2">
+                        Sold / Closed Positions
+                      </div>
+                      {soldStocks.map(s => (
+                        <SelectItem key={s.id} value={s.id}>
+                          <span className="font-medium text-gray-500">{s.symbol}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{s.account}</span>
+                          <span className="ml-1.5 text-[10px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded">sold</span>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             )}/>

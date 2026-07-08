@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 
-export default function DividendCharts({ dividends = [], stocks = [] }) {
+export default function DividendCharts({ dividends = [], stocks = [], globalCurrency = "CAD" }) {
   const year = new Date().getFullYear()
   const monthly = Array.from({ length: 12 }, (_, i) => ({
     month: new Date(2024, i).toLocaleString("default", { month:"short" }),
@@ -10,12 +10,17 @@ export default function DividendCharts({ dividends = [], stocks = [] }) {
   }))
   dividends.forEach(d => {
     const dt = new Date(d.date)
-    if (dt.getFullYear() === year) monthly[dt.getMonth()].amount += d.amount || 0
   })
   const byStock = {}
   dividends.forEach(d => {
     const sym = stocks.find(s => s.id === d.stock_id)?.symbol || d.stock_id
-    byStock[sym] = (byStock[sym] || 0) + (d.amount || 0)
+    const stockC2 = stocks.find(s => s.id === d.stock_id)
+    const cur2 = d.currency || stockC2?.currency || "USD"
+    const USD_CAD2 = 1.37
+    const amt2 = (globalCurrency === "CAD" && cur2 === "USD") ? (d.amount||0)*USD_CAD2
+      : (globalCurrency === "USD" && cur2 === "CAD") ? (d.amount||0)/USD_CAD2
+      : (d.amount||0)
+    byStock[sym] = (byStock[sym] || 0) + amt2
   })
   const stockData = Object.entries(byStock).map(([symbol, amount]) => ({ symbol, amount })).sort((a,b) => b.amount - a.amount)
   return (
