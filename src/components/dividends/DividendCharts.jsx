@@ -9,10 +9,11 @@ export default function DividendCharts({ dividends = [], stocks = [], globalCurr
     amount: 0
   }))
   dividends.forEach(d => {
+    if (!d.stock_id) return  // skip cash entries
     const dt = new Date(d.date)
     if (dt.getFullYear() !== year) return
     const stockC = stocks.find(s => s.id === d.stock_id)
-    const cur = d.currency || stockC?.currency || "USD"
+    const cur = d.currency || stockC?.currency || "USD"  // includes cash (stock_id=null)
     const USD_CAD = 1.37
     const amt = (globalCurrency === "CAD" && cur === "USD") ? (d.amount||0) * USD_CAD
       : (globalCurrency === "USD" && cur === "CAD") ? (d.amount||0) / USD_CAD
@@ -21,6 +22,7 @@ export default function DividendCharts({ dividends = [], stocks = [], globalCurr
   })
   const byStock = {}
   dividends.forEach(d => {
+    if (!d.stock_id) return  // skip cash entries
     const sym = stocks.find(s => s.id === d.stock_id)?.symbol || d.stock_id
     const stockC2 = stocks.find(s => s.id === d.stock_id)
     const cur2 = d.currency || stockC2?.currency || "USD"

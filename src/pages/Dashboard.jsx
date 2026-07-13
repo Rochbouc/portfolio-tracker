@@ -722,12 +722,12 @@ function ExchangeRateWidget() {
   const [lastUpd, setLastUpd] = useState(null)
   const STORAGE_KEY = "usd_cad_rate_v1"
 
-  useState(() => {
+  useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY))
       if (saved?.rate) { setRate(saved.rate); setLive(saved.rate); setLastUpd(saved.ts) }
     } catch {}
-  })
+  }, [])
 
   async function fetchLive() {
     setLoading(true)
@@ -924,25 +924,81 @@ function DashboardInner() {
   const totalGain = totalValue - totalCost + currentYearContribs;
   const totalGainPct = (totalCost - currentYearContribs) > 0 ? (totalGain / (totalCost - currentYearContribs)) * 100 : 0;
   const thisYear = new Date().getFullYear();
-  // All-time dividend totals
+  // All-time dividend totals — stock entries only (exclude cash/MISC with no stock_id)
   const totalDividendsCAD = dividends.reduce((s, d) => {
+    if (!d.stock_id) return s  // skip cash entries
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
     return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
   }, 0);
   const totalDividendsUSD = dividends.reduce((s, d) => {
+    if (!d.stock_id) return s  // skip cash entries
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
     return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
   }, 0);
-  // Current year only (for the card)
-  const thisYearDivsCAD = dividends.filter(d => new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
+  // Current year only — stock entries only
+  const thisYearDivsCAD = dividends.filter(d => d.stock_id && new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
     return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
   }, 0);
-  const thisYearDivsUSD = dividends.filter(d => new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
+  const thisYearDivsUSD = dividends.filter(d => d.stock_id && new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
     const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
     return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
   }, 0);
   const totalDividendsReceived = globalCurrency === "CAD" ? thisYearDivsCAD : thisYearDivsUSD;
+
+  // Per-account breakdown: separate CAD stocks, USD stocks, and cash (sold) entries
+  const thisYearByAccount = useMemo(() => {
+    const map = {}  // { RRSP: { CAD: 0, USD: 0, cashCAD: 0, cashUSD: 0 }, ... }
+    dividends
+      .filter(d => new Date(d.date).getFullYear() === thisYear)
+      .forEach(d => {
+        const stock  = stocks.find(s => s.id === d.stock_id)
+        const isCash = !d.stock_id   // cash/sold entry — exclude from CAD/USD stock totals
+        const acct   = d.account_type || stock?.account_type || "Other"
+        const cur    = d.currency || stock?.currency || "USD"
+        const amt    = d.amount || 0
+        if (!map[acct]) map[acct] = { CAD: 0, USD: 0, cashCAD: 0, cashUSD: 0 }
+        if (isCash) {
+          // Cash entries go ONLY in the cash bucket
+          if (cur === "CAD") map[acct].cashCAD += amt
+          else               map[acct].cashUSD += amt
+        } else {
+          // Real stock entries go in CAD or USD bucket
+          if (cur === "CAD") map[acct].CAD += amt
+          else               map[acct].USD += amt
+        }
+      })
+    return map
+  }, [dividends, stocks, thisYear])
+
+  // CAD vs USD split for current year (native amounts, not converted)
+  const thisYearNativeCAD = dividends
+    .filter(d => new Date(d.date).getFullYear() === thisYear)
+    .reduce((s, d) => {
+      const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD"
+      return cur === "CAD" ? s + (d.amount||0) : s
+    }, 0)
+  const thisYearNativeUSD = dividends
+    .filter(d => new Date(d.date).getFullYear() === thisYear)
+    .reduce((s, d) => {
+      const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD"
+      return cur === "USD" ? s + (d.amount||0) : s
+    }, 0)
+
+  // All-time cash dividend totals per account (stock_id = null = sold stock entries)
+  const cashDivTotals = useMemo(() => {
+    const byAcct = {}  // { RRSP: { CAD: 0, USD: 0 }, TFSA: { CAD: 0, USD: 0 } }
+    dividends.forEach(d => {
+      if (d.stock_id) return  // skip active stock entries
+      const acct = d.account_type || "Other"
+      const cur  = d.currency || "USD"
+      const amt  = d.amount || 0
+      if (!byAcct[acct]) byAcct[acct] = { CAD: 0, USD: 0 }
+      byAcct[acct][cur] = (byAcct[acct][cur] || 0) + amt
+    })
+    return byAcct
+  }, [dividends, thisYear])
+
   const estAnnualDividends = stocks.reduce((s, st) =>
     s + toGlobalCurrency(parseFloat(st.annual_dividend) || 0, st.currency || "USD"), 0);
 
@@ -1060,7 +1116,7 @@ function DashboardInner() {
     await loadAll();
   };
   const handleAddDividend = async (data) => {
-    const stock = stocks.find(s => s.id === data.stock_id);
+    const stock = data.stock_id ? stocks.find(s => s.id === data.stock_id) : null;
     // Use stock's native currency — never convert at entry time
     const cur = data.currency || stock?.currency || "USD";
     await Dividend.create({ ...data, currency: cur });
@@ -1068,7 +1124,8 @@ function DashboardInner() {
     if (data.amount > 0) {
       await adjustCash(acct, cur, parseFloat(data.amount));
     }
-    toast({ title: `Dividend recorded (${cur} $${parseFloat(data.amount).toFixed(2)})` });
+    const label = data.symbol || stock?.symbol || "dividend";
+    toast({ title: `${label} dividend recorded (${cur} $${parseFloat(data.amount).toFixed(2)})` });
     await loadAll();
   };
   const handleDeleteDividend = async (id) => { await Dividend.delete(id); await loadAll(); };
@@ -1153,6 +1210,63 @@ function DashboardInner() {
               </Card>
             ))}
           </div>
+
+          {/* Per-account dividend breakdown — one card per account */}
+          {Object.keys(thisYearByAccount).length > 0 && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              {Object.entries(thisYearByAccount)
+                .sort((a,b) => a[0].localeCompare(b[0]))
+                .map(([acct, amts]) => {
+                  const acctTotal = globalCurrency === "CAD"
+                    ? amts.CAD + amts.USD * USD_CAD
+                    : amts.CAD / USD_CAD + amts.USD
+                  return (
+                    <Card key={acct} className="bg-white">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-gray-700">{acct}</span>
+                            <span className="text-[10px] text-gray-400">{thisYear}</span>
+                          </div>
+                          <span className="text-xs font-semibold text-green-600">{fmt(acctTotal, globalCurrency)}</span>
+                        </div>
+                        <div className="space-y-1">
+                          {amts.CAD > 0 && (
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-red-500">🍁 CAD stocks</span>
+                              <span className="font-medium text-gray-800">C${amts.CAD.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {amts.USD > 0 && (
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="text-blue-500">🇺🇸 USD stocks</span>
+                              <span className="font-medium text-gray-800">US${amts.USD.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {(amts.cashCAD > 0 || amts.cashUSD > 0) && (
+                            <div className="border-l-2 border-amber-300 pl-2 mt-1.5">
+                              <div className="text-[10px] text-amber-600 font-medium mb-0.5">💰 Cash (sold stocks)</div>
+                              {amts.cashCAD > 0 && (
+                                <div className="flex justify-between items-center text-xs pl-1">
+                                  <span className="text-red-400">🍁 CAD</span>
+                                  <span className="font-medium text-gray-700">C${amts.cashCAD.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {amts.cashUSD > 0 && (
+                                <div className="flex justify-between items-center text-xs pl-1">
+                                  <span className="text-blue-400">🇺🇸 USD</span>
+                                  <span className="font-medium text-gray-700">US${amts.cashUSD.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+            </div>
+          )}
         </div>
 
         {/* Main + Sidebar */}

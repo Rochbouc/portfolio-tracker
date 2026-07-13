@@ -74,11 +74,6 @@ function EditableCell({ value, onSave, currency="CAD", displayCur="CAD" }) {
 
 export default function HistoricalDividends({ dividends = [], stocks = [], globalCurrency = "CAD" }) {
   // Map symbol|account -> currency from live stocks
-  const stockCurrencyMap = useMemo(() => {
-    const m = {}
-    stocks.forEach(s => { m[`${s.symbol}|${s.account_type}`] = s.currency || "CAD" })
-    return m
-  }, [stocks])
   const [data,          setData]         = useState(load)
   const [newSymbol,     setNewSymbol]    = useState("")
   const [newAccount,    setNewAccount]   = useState("RRSP")
@@ -87,6 +82,12 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
   const displayCur = globalCurrency  // use master switch
   const USD_CAD = 1.37
   const currentYear = new Date().getFullYear()
+
+  const stockCurrencyMap = useMemo(() => {
+    const m = {}
+    stocks.forEach(s => { m[`${s.symbol}|${s.account_type}`] = s.currency || "CAD" })
+    return m
+  }, [stocks])
 
   // Get currency for a symbol from live stocks
   function getStockCurrency(sym, acct) {
@@ -154,9 +155,16 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
       .filter(d => new Date(d.date).getFullYear() === currentYear)
       .forEach(d => {
         const stock = stocks.find(s => s.id === d.stock_id)
-        if (!stock) return
-        const key = `${stock.symbol}|${stock.account_type || "RRSP"}`
-        map[key] = (map[key] || 0) + (d.amount || 0)
+        if (stock) {
+          const key = `${stock.symbol}|${stock.account_type || "RRSP"}`
+          map[key] = (map[key] || 0) + (d.amount || 0)
+        } else {
+          // Cash/Other entry — no stock_id, group under symbol from notes or "Cash"
+          const sym  = (d.symbol || d.notes?.split(" — ")[0] || "Cash").toUpperCase()
+          const acct = d.account_type || "RRSP"
+          const key  = `${sym}|${acct}`
+          map[key] = (map[key] || 0) + (d.amount || 0)
+        }
       })
     return map
   }, [dividends, stocks, currentYear])
@@ -172,7 +180,11 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
     const convertLive = (amount, key) => {
       const [sym, acct] = key.split("|")
       const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
-      const cur = stock?.currency || "USD"
+      const cashDiv = !stock ? dividends.find(d => {
+        const s = (d.symbol || d.notes?.split(" — ")[0] || "Cash").toUpperCase()
+        return s === sym && (d.account_type || "RRSP") === acct
+      }) : null
+      const cur = stock?.currency || cashDiv?.currency || "USD"
       if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
       if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
       return amount
@@ -196,12 +208,15 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
     const convertLive = (amount, key) => {
       const [sym, acct] = key.split("|")
       const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
-      const cur = stock?.currency || "USD"
+      const cashDiv = !stock ? dividends.find(d => {
+        const s = (d.symbol || d.notes?.split(" — ")[0] || "Cash").toUpperCase()
+        return s === sym && (d.account_type || "RRSP") === acct
+      }) : null
+      const cur = stock?.currency || cashDiv?.currency || "USD"
       if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
       if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
       return amount
     }
-    const totals = {}
     accountOrder.forEach(acct => {
       totals[acct] = {}
       YEARS.forEach(y => {

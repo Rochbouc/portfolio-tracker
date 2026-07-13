@@ -186,6 +186,7 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
   const actualByMonth = useMemo(() => {
     const map = {}
     dividends.forEach(d => {
+      if (!d.stock_id) return  // skip cash/sold entries
       const dt  = new Date(d.date)
       const key = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`
       const stock = stocks.find(s => s.id === d.stock_id)

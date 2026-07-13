@@ -12,11 +12,16 @@ import { getDividendData } from "@/api/dividendData"
 import { getPaySchedule } from "@/api/dividendData"
 import { cn } from "@/lib/utils"
 
+const CASH_ID_CAD = "__CASH_CAD__"
+const CASH_ID_USD = "__CASH_USD__"
+const CASH_IDS    = [CASH_ID_CAD, CASH_ID_USD]
+
 const schema = z.object({
   stock_id:     z.string().min(1, "Required"),
   account_type: z.string().min(1, "Required"),
   amount:       z.coerce.number().positive("Must be > 0"),
   date:         z.string().min(1, "Required"),
+  symbol:       z.string().optional(),   // for cash entries
   notes:        z.string().optional(),
 })
 
@@ -73,43 +78,6 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
   const selectedStockId = watch("stock_id")
   const selectedStock   = stocks.find(s => s.id === selectedStockId)
 
-  // Auto-fill account + currency when stock changes
-  useEffect(() => {
-    if (!selectedStockId) return
-    // Try active stock first
-    if (selectedStock) {
-      setValue("account_type", selectedStock.account_type || "")
-      setCurrency(selectedStock.currency || "CAD")
-      return
-    }
-    // Fall back to sold stock
-    const sold = soldStocks.find(s => s.id === selectedStockId)
-    if (sold) {
-      setValue("account_type", sold.account || "")
-      setCurrency(sold.currency || "USD")
-    }
-  }, [selectedStockId, stocks, soldStocks, setValue])
-
-  // Auto-suggest amount from dividend calendar data
-  useEffect(() => {
-    if (!selectedStock || suggestUsed) return
-    const sched = getPaySchedule(selectedStock.symbol)
-    if (sched && sched.frequency > 0) {
-      const fetch = async () => {
-        setLoadingAmount(true)
-        try {
-          const data = await getDividendData(selectedStock.symbol, selectedStock.shares, selectedStock.avg_cost, selectedStock)
-          if (data?.annualTotal > 0) {
-            const perPayment = data.annualTotal / (sched.frequency || 4)
-            setValue("amount", parseFloat(perPayment.toFixed(2)))
-          }
-        } catch {}
-        finally { setLoadingAmount(false) }
-      }
-      fetch()
-    }
-  }, [selectedStockId])
-
   // Derive sold/closed stocks from transactions
   const soldStocks = useMemo(() => {
     // Group transactions by stockId
@@ -140,6 +108,46 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
   }, [stocks, transactions])
 
   // Stock options sorted alphabetically with account shown
+    // Auto-fill account + currency when stock changes
+  useEffect(() => {
+    if (!selectedStockId) return
+    if (CASH_IDS.includes(selectedStockId)) {
+      setCurrency(selectedStockId === CASH_ID_CAD ? "CAD" : "USD")
+      return
+    }
+    if (selectedStock) {
+      setValue("account_type", selectedStock.account_type || "")
+      setCurrency(selectedStock.currency || "CAD")
+      return
+    }
+    const sold = soldStocks.find(s => s.id === selectedStockId)
+    if (sold) {
+      setValue("account_type", sold.account || "")
+      setCurrency(sold.currency || "USD")
+    }
+  }, [selectedStockId, stocks, soldStocks, setValue])
+
+  // Auto-suggest amount from dividend calendar data
+  useEffect(() => {
+    if (!selectedStock || suggestUsed) return
+    const sched = getPaySchedule(selectedStock.symbol)
+    if (sched && sched.frequency > 0) {
+      const fetch = async () => {
+        setLoadingAmount(true)
+        try {
+          const data = await getDividendData(selectedStock.symbol, selectedStock.shares, selectedStock.avg_cost, selectedStock)
+          if (data?.annualTotal > 0) {
+            const perPayment = data.annualTotal / (sched.frequency || 4)
+            setValue("amount", parseFloat(perPayment.toFixed(2)))
+          }
+        } catch {}
+        finally { setLoadingAmount(false) }
+      }
+      fetch()
+    }
+  }, [selectedStockId])
+
+
   const stockOptions = useMemo(() => {
     return [...stocks]
       .filter(s => (s.shares || 0) > 0)
@@ -180,8 +188,14 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
   }
 
   const onForm = async (data) => {
-    // Store currency with the dividend so totals display correctly
-    await onSubmit({ ...data, currency })
+    const payload = { ...data, currency }
+    // For cash entries, store as a special record with the entered symbol
+    if (CASH_IDS.includes(data.stock_id)) {
+      payload.stock_id = null
+      payload.symbol   = (data.symbol || "").toUpperCase().trim()
+      payload.notes    = [data.symbol, data.notes].filter(Boolean).join(" — ")
+    }
+    await onSubmit(payload)
     reset()
     setSuggestUsed(false)
     onOpenChange(false)
@@ -241,6 +255,16 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
                   <SelectValue placeholder="Select stock" />
                 </SelectTrigger>
                 <SelectContent>
+                  {/* Cash / manual entry options */}
+                  <SelectItem value={CASH_ID_CAD}>
+                    <span className="font-medium">💰 Cash / Other (CAD)</span>
+                    <span className="ml-2 text-xs text-muted-foreground">Canadian stock — enter symbol manually</span>
+                  </SelectItem>
+                  <SelectItem value={CASH_ID_USD}>
+                    <span className="font-medium">💵 Cash / Other (USD)</span>
+                    <span className="ml-2 text-xs text-muted-foreground">US stock — enter symbol manually</span>
+                  </SelectItem>
+                  <div className="mx-2 my-1 border-t border-gray-100"/>
                   {/* Active stocks */}
                   {stockOptions.map(s => (
                     <SelectItem key={s.id} value={s.id}>
@@ -287,6 +311,16 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
             )}/>
             {errors.account_type && <p className="text-xs text-destructive">{errors.account_type.message}</p>}
           </div>
+
+          {/* Manual symbol entry for cash/other */}
+          {CASH_IDS.includes(selectedStockId) && (
+            <div className="space-y-1.5">
+              <Label>Stock Symbol *</Label>
+              <Input {...register("symbol")} placeholder="e.g. VOO, TD, AAPL"
+                className="uppercase" onChange={e => e.target.value = e.target.value.toUpperCase()}/>
+              <p className="text-[10px] text-gray-400">Enter the ticker symbol of the stock you received a dividend from</p>
+            </div>
+          )}
 
           {/* Amount + Currency indicator */}
           <div className="grid grid-cols-2 gap-3">
