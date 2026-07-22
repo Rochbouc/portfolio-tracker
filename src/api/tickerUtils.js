@@ -92,6 +92,14 @@ export function toYahooTicker(symbol, stock = {}) {
   if (!symbol) return symbol
   const sym = symbol.trim().toUpperCase()
 
+  // 0. Crypto pairs — pass through as-is (e.g. BTC-CAD, ETH-CAD, BTC-USD)
+  if (/^(BTC|ETH|SOL|ADA|XRP|DOGE|DOT|AVAX|MATIC|LTC)-(CAD|USD|EUR)$/.test(sym)) {
+    return sym
+  }
+  if (stock.market === "CRYPTO" || stock.sector === "Crypto" || stock.sector === "Cryptocurrency") {
+    return sym  // pass through crypto tickers unchanged
+  }
+
   // 1. Already has a Yahoo suffix — return as-is
   if (sym.endsWith(".TO") || sym.endsWith(".V") || sym.endsWith(".CN") ||
       sym.endsWith(".NE") || sym.endsWith(".L") || sym.endsWith(".F") ||

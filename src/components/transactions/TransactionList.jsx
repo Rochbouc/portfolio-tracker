@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Trash2, Pencil, Loader2 } from "lucide-react"
+import { Trash2, Pencil, Loader2, Search, X } from "lucide-react"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 
 function EditTransactionDialog({ transaction, stocks, open, onOpenChange, onSave }) {
@@ -118,20 +118,57 @@ function EditTransactionDialog({ transaction, stocks, open, onOpenChange, onSave
 
 export default function TransactionList({ transactions = [], stocks = [], onDelete, onEdit }) {
   const [editingTx, setEditingTx] = useState(null)
+  const [search,    setSearch]    = useState("")
 
   const fmt = (n, currency) => n == null ? "-"
     : new Intl.NumberFormat("en-CA", { style:"currency", currency: currency||"USD" }).format(n)
   const getStock = id => stocks.find(s => s.id === id)
 
+  const sorted = [...transactions].sort((a,b) => new Date(b.date)-new Date(a.date))
+  const filtered = search.trim()
+    ? sorted.filter(t => {
+        const stock = getStock(t.stock_id)
+        const sym   = (t.symbol || stock?.symbol || "").toLowerCase()
+        const name  = (stock?.name || "").toLowerCase()
+        const acct  = (t.account_type || stock?.account_type || "").toLowerCase()
+        const q     = search.toLowerCase()
+        return sym.includes(q) || name.includes(q) || acct.includes(q) ||
+               String(t.shares||"").includes(q) || String(t.price||"").includes(q) ||
+               (t.date||"").includes(q) || (t.type||"").includes(q)
+      })
+    : sorted
+
   return (
     <Card className="bg-white">
-      <CardHeader><CardTitle className="text-sm text-gray-700">Transaction History</CardTitle></CardHeader>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm text-gray-700">Transaction History</CardTitle>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+            <input
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search transactions..."
+              className="pl-8 pr-7 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 w-44"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+        {search && (
+          <div className="text-xs text-gray-400 mt-1">{filtered.length} of {transactions.length} transactions</div>
+        )}
+      </CardHeader>
       <CardContent className="p-0">
         {transactions.length === 0 ? (
           <div className="text-center py-10 text-gray-400 text-sm">No transactions yet.</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-10 text-gray-400 text-sm">No transactions match "{search}"</div>
         ) : (
           <div className="divide-y">
-            {[...transactions].sort((a,b) => new Date(b.date)-new Date(a.date)).map(t => {
+            {filtered.map(t => {
               const stock    = getStock(t.stock_id)
               const currency = stock?.currency || "USD"
               const sym      = t.symbol || stock?.symbol || t.stock_id

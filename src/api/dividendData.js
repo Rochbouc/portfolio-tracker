@@ -206,7 +206,15 @@ const KNOWN_DIVIDENDS = {
   "POW.TO":  { rate: 2.40, freq: 4,  currency: "CAD" },
   "SU.TO":   { rate: 2.20, freq: 4, currency: "CAD", payDay: 25, payMonths: [3,6,9,12] },
   "CNQ.TO":  { rate: 4.00, freq: 4, currency: "CAD", payDay: 15, payMonths: [1,4,7,10] },
-  // ── Your holdings — plain symbols (no .TO suffix) ──────────────────
+  "SOBO":      { rate: 2.79,  freq: 4,  currency: "CAD", payMonths: [1,4,7,10], payDay: 15 },  // South Bow Corp quarterly
+  "HR-UN.TO":  { rate: 0.60,   freq: 12, currency: "CAD", payDay: 1  },  // H&R REIT — $1.75/mo (35sh) + $5.00/mo (100sh) = $0.60/sh/yr
+  "REI-UN.TO": { rate: 1.04,   freq: 12, currency: "CAD", payDay: 2  },  // RioCan REIT — $5.60/mo (58sh) + $0.48/mo (5sh)
+  "VOO":       { rate: 7.86,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard S&P500
+  "VTI":       { rate: 3.55,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard Total Market
+  "CANY.TO":   { rate: 2.52,   freq: 12, currency: "CAD", payDay: 9  },  // Evolve Canadian Equity — $12.60/mo / 60sh
+  "QQCL.TO":   { rate: 3.72,   freq: 12, currency: "CAD", payDay: 8  },  // Global X Enhanced NASDAQ — $12.40/mo / 40sh
+  "USCL.TO":   { rate: 2.82,   freq: 12, currency: "CAD", payDay: 8  },  // Global X Enhanced S&P500 — $9.40/mo / 40sh
+  "MSFT.NE":   { rate: 0.186,  freq: 4,  currency: "CAD", payDay: 8, payMonths: [3,6,9,12] },  // Microsoft CAD-listed
   "TRP":   { rate: 3.72,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [1,4,7,10] },
   "ENB":   { rate: 3.77,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [3,6,9,12] },
   "TD":    { rate: 4.08,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [1,4,7,10] },
@@ -222,11 +230,12 @@ const KNOWN_DIVIDENDS = {
   "BN":    { rate: 0.76,  freq: 4,  currency: "CAD", payDay: 28, payMonths: [3,6,9,12] },
   "DOL":   { rate: 0.92,  freq: 4,  currency: "CAD", payDay:  5, payMonths: [2,5,8,11] },
   "VFV":   { rate: 2.40,  freq: 12, currency: "CAD", payDay: 25 },
-  "XIC":   { rate: 0.80,  freq: 12, currency: "CAD", payDay: 22 },
-  "XEQT":  { rate: 1.20,  freq: 12, currency: "CAD", payDay: 22 },
+  "XIC":   { rate: 0.80,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~30th
+  "XEQT":  { rate: 1.20,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~30th
+  "XEQT.TO":{ rate: 1.20, freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // same as XEQT
+  "XETM":  { rate: 1.00,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~30th
   "XEF":   { rate: 1.40,  freq: 12, currency: "CAD", payDay: 22 },
   "XUS":   { rate: 1.20,  freq: 12, currency: "CAD", payDay: 22 },
-  "XETM":  { rate: 1.00,  freq: 12, currency: "CAD", payDay: 22 },
   "AZN":   { rate: 3.00,  freq: 2,  currency: "USD", payDay: 15, payMonths: [3,9] },
   "LLY":   { rate: 5.40,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
   "ABBV":  { rate: 6.20,  freq: 4,  currency: "USD", payDay: 15, payMonths: [2,5,8,11] },
@@ -237,7 +246,7 @@ const KNOWN_DIVIDENDS = {
   "V":     { rate: 2.34,  freq: 4,  currency: "USD", payDay:  5, payMonths: [3,6,9,12] },
   "T":     { rate: 1.11,  freq: 4,  currency: "USD", payDay:  1, payMonths: [2,5,8,11] },
   "XOM":   { rate: 3.84,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
-  "RTX":   { rate: 2.60,  freq: 4,  currency: "USD", payDay: 19, payMonths: [1,4,7,10] },
+  "RTX":   { rate: 2.60,  freq: 4,  currency: "USD", payDay: 26, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~26th
   "PEP":   { rate: 5.42,  freq: 4,  currency: "USD", payDay:  5, payMonths: [1,4,7,10] },
   "AVGO":  { rate: 21.00, freq: 4,  currency: "USD", payDay: 29, payMonths: [3,6,9,12] },
   "GOOGL": { rate: 0.80,  freq: 4,  currency: "USD", payDay: 17, payMonths: [3,6,9,12] },

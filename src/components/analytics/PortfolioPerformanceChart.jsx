@@ -1,182 +1,185 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid
-} from "recharts"
-import { TrendingUp, RefreshCw, Loader2 } from "lucide-react"
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts"
+import { TrendingUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const PROXIES = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+const COLORS = { "Total Portfolio":"#3b82f6", RRSP:"#10b981", TFSA:"#f59e0b", Margin:"#8b5cf6" }
 
-async function fetchHistory(symbol, range = "1y") {
-  const intMap  = { "1m":"1d","3m":"1d","6m":"1d","1y":"1wk","2y":"1wk","5y":"1mo" }
-  const rangeMap = { "1m":"1mo","3m":"3mo","6m":"6mo","1y":"1y","2y":"2y","5y":"5y" }
-  const interval = intMap[range] || "1wk"
-  const r        = rangeMap[range] || "1y"
-  for (const proxy of PROXIES) {
-    try {
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${r}`
-      const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { headers: { Accept:"application/json" } })
-      if (!res.ok) continue
-      const data = await res.json()
-      const result = data?.chart?.result?.[0]
-      if (!result) continue
-      const timestamps = result.timestamp || []
-      const closes     = result.indicators?.quote?.[0]?.close || []
-      return timestamps.map((t, i) => ({
-        ts:    t,
-        date:  new Date(t * 1000).toLocaleDateString("en-CA", { month:"short", day:"numeric", year:"2-digit" }),
-        close: closes[i] != null ? parseFloat(closes[i].toFixed(2)) : null,
-      })).filter(d => d.close !== null)
-    } catch { /* try next */ }
-  }
-  return []
+function fmtLarge(n) {
+  if (n == null) return "-"
+  if (Math.abs(n) >= 1e6) return "$" + (n/1e6).toFixed(2) + "M"
+  if (Math.abs(n) >= 1e3) return "$" + (n/1e3).toFixed(0) + "K"
+  return "$" + n.toFixed(0)
 }
 
-const COLORS = ["#3b82f6","#10b981","#f59e0b","#8b5cf6","#ef4444","#06b6d4","#f97316","#84cc16"]
+function fmtCur(n, cur) {
+  return new Intl.NumberFormat("en-CA",{style:"currency",currency:cur||"CAD",maximumFractionDigits:0}).format(n||0)
+}
 
-function CustomTooltip({ active, payload, label }) {
+function CustomTooltip({ active, payload, label, currency }) {
   if (!active || !payload?.length) return null
-  const items = payload.filter(p => p.value != null)
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs min-w-[140px]">
+    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs min-w-[160px]">
       <div className="font-semibold text-gray-600 mb-1.5">{label}</div>
-      {items.map((p, i) => (
+      {payload.filter(p=>p.value!=null).map((p,i) => (
         <div key={i} className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-sm" style={{ background: p.color }} />
-            <span className="text-gray-500 truncate max-w-[80px]">{p.name}</span>
+            <div className="w-2 h-2 rounded-sm" style={{background:p.color}}/>
+            <span className="text-gray-500">{p.name}</span>
           </div>
-          <span className="font-semibold text-gray-900">${p.value?.toLocaleString()}</span>
+          <span className="font-semibold text-gray-900">{fmtLarge(p.value)}</span>
         </div>
       ))}
     </div>
   )
 }
 
-export default function PortfolioPerformanceChart({ stocks = [], prices = {}, globalCurrency = "CAD", totalGain: passedGain, totalValue: passedValue, totalCost: passedCost }) {
-  const [range, setRange]         = useState("1y")
-  const [loading, setLoading]     = useState(false)
-  const [histData, setHistData]   = useState({})
-  const [error, setError]         = useState("")
-  const [hiddenLines, setHiddenLines] = useState(new Set())
+export default function PortfolioPerformanceChart({
+  stocks = [], prices = {}, transactions = [], globalCurrency = "CAD",
+  totalGain: passedGain, totalValue: passedValue, totalCost: passedCost
+}) {
+  const [range, setRange] = useState("ytd")
+  const USD_CAD = getRate()
   const CAD_USD = 0.73
-  const USD_CAD = 1.37
 
-  function toDisplay(amount, stockCur) {
+  function toDisplay(amount, cur) {
     if (!amount) return 0
-    if (stockCur === globalCurrency) return amount
-    if (globalCurrency === "USD" && stockCur === "CAD") return amount * CAD_USD
-    if (globalCurrency === "CAD" && stockCur === "USD") return amount * USD_CAD
+    if (cur === globalCurrency) return amount
+    if (globalCurrency === "CAD" && cur === "USD") return amount * USD_CAD
+    if (globalCurrency === "USD" && cur === "CAD") return amount * CAD_USD
     return amount
   }
 
-  const loadHistory = async () => {
-    if (stocks.length === 0) return
-    setLoading(true)
-    setError("")
-    try {
-      const results = await Promise.all(
-        stocks.map(async s => {
-          const data = await fetchHistory(s.symbol, range)
-          return [s.symbol, data]
-        })
-      )
-      setHistData(Object.fromEntries(results))
-    } catch (e) {
-      setError("Could not load historical data")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { loadHistory() }, [range, stocks.map(s => s.id).join(",")])
-
-  const accountGroups = useMemo(() => {
-    const groups = {}
-    stocks.forEach(s => {
-      const acct = s.account_type || "Unassigned"
-      if (!groups[acct]) groups[acct] = []
-      groups[acct].push(s)
-    })
-    return groups
-  }, [stocks])
-
-  const accountNames = Object.keys(accountGroups)
-  const showAccounts = accountNames.length > 1
-
-  // All line keys: Total + per-account
-  const allLineKeys = useMemo(() => {
-    const keys = ["Total Portfolio"]
-    if (showAccounts) accountNames.forEach(a => keys.push(a))
-    return keys
-  }, [accountNames, showAccounts])
-
-  const chartData = useMemo(() => {
-    if (Object.keys(histData).length === 0) return []
-    const allTimestamps = new Set()
-    Object.values(histData).forEach(history => history.forEach(d => allTimestamps.add(d.ts)))
-    const sortedTs = [...allTimestamps].sort((a, b) => a - b)
-    return sortedTs.map(ts => {
-      const dateLabel = new Date(ts * 1000).toLocaleDateString("en-CA", {
-        month:"short", day:"numeric", year:"2-digit"
-      })
-      let total = 0
-      const accountValues = {}
-      stocks.forEach(stock => {
-        const history = histData[stock.symbol] || []
-        const entry   = history.filter(h => h.ts <= ts).slice(-1)[0]
-        const price   = entry?.close ?? null
-        if (price == null) return
-        const value = toDisplay(price * stock.shares, stock.currency || "USD")
-        total += value
-        const acct = stock.account_type || "Unassigned"
-        accountValues[acct] = (accountValues[acct] || 0) + value
-      })
-      return {
-        date: dateLabel,
-        "Total Portfolio": parseFloat(total.toFixed(0)),
-        ...Object.fromEntries(Object.entries(accountValues).map(([k, v]) => [k, parseFloat(v.toFixed(0))])),
-      }
-    })
-  }, [histData, globalCurrency, stocks])
-
-  const currentTotal = passedValue ?? stocks.reduce((s, st) => {
-    const p = prices[st.symbol]?.price ?? st.avg_cost
-    return s + toDisplay(p * st.shares, st.currency || "USD")
-  }, 0)
-  const costBasis = passedCost ?? stocks.reduce((s, st) => s + toDisplay(st.avg_cost * st.shares, st.currency || "USD"), 0)
-  // Use passed-in gain so it matches the Holdings header exactly
-  const totalGain    = passedGain ?? (currentTotal - costBasis)
+  const currentTotal = passedValue ?? 0
+  const costBasis    = passedCost  ?? 0
+  const totalGain    = passedGain  ?? (currentTotal - costBasis)
   const totalGainPct = costBasis > 0 ? (totalGain / costBasis) * 100 : 0
 
-  const fmtLarge = n => {
-    if (n == null) return "-"
-    if (Math.abs(n) >= 1e6) return "$" + (n/1e6).toFixed(2) + "M"
-    if (Math.abs(n) >= 1e3) return "$" + (n/1e3).toFixed(1) + "K"
-    return "$" + n.toFixed(0)
-  }
+  // Get start-of-year value and contributions from transactions
+  const { startValue, ytdContributions, chartData, accountNames } = useMemo(() => {
+    const today = new Date()
+    const yr    = today.getFullYear()
 
-  const RANGES = [["1m","1M"],["3m","3M"],["6m","6M"],["1y","1Y"],["2y","2Y"],["5y","5Y"]]
+    // Determine date range
+    let startDate
+    if (range === "ytd")      { startDate = new Date(yr, 0, 1) }
+    else if (range === "1y")  { startDate = new Date(today); startDate.setFullYear(today.getFullYear()-1) }
+    else if (range === "2y")  { startDate = new Date(today); startDate.setFullYear(today.getFullYear()-2) }
+    else if (range === "3y")  { startDate = new Date(today); startDate.setFullYear(today.getFullYear()-3) }
+    else if (range === "5y")  { startDate = new Date(today); startDate.setFullYear(today.getFullYear()-5) }
+    else                      { startDate = new Date("2018-01-01") }
 
-  function toggleLine(key) {
-    setHiddenLines(prev => {
-      const next = new Set(prev)
-      // Don't allow hiding all lines — keep at least one visible
-      const wouldAllBeHidden = allLineKeys.every(k => k === key ? true : next.has(k))
-      if (wouldAllBeHidden) return prev
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
+    // Get unique accounts
+    const accts = [...new Set(stocks.map(s => s.account_type).filter(Boolean))].sort()
+
+    // Calculate current value per stock
+    const stockValues = {}
+    const stockAcct   = {}
+    const stockCur    = {}
+    stocks.forEach(s => {
+      const p     = prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0
+      const val   = toDisplay(p * (s.shares || 0), s.currency || "USD")
+      stockValues[s.id] = val
+      stockAcct[s.id]   = s.account_type || "Other"
+      stockCur[s.id]    = s.currency || "USD"
     })
-  }
 
-  const lineColor = (key) => {
-    if (key === "Total Portfolio") return COLORS[0]
-    const idx = accountNames.indexOf(key)
-    return COLORS[(idx + 1) % COLORS.length]
-  }
+    // Build daily data points from transactions
+    // We'll build monthly snapshots between startDate and today
+    const months = []
+    const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+    while (cur <= today) {
+      months.push(new Date(cur))
+      cur.setMonth(cur.getMonth() + 1)
+    }
+    months.push(new Date(today))
+
+    // For each month: compute portfolio value by tracking which shares were held
+    // Simple approach: use current prices but adjust share counts based on transactions
+    const txByStock = {}
+    transactions.forEach(tx => {
+      const sid = tx.stock_id
+      if (!txByStock[sid]) txByStock[sid] = []
+      txByStock[sid].push(tx)
+    })
+
+    // Compute shares held at each date
+    function sharesAtDate(stockId, date) {
+      const txs = txByStock[stockId] || []
+      let shares = 0
+      txs.forEach(tx => {
+        if (new Date(tx.date) <= date) {
+          if (tx.type === "buy")  shares += tx.shares || 0
+          if (tx.type === "sell") shares -= tx.shares || 0
+        }
+      })
+      return Math.max(0, shares)
+    }
+
+    // Contributions in range (buy transactions)
+    let ytdContribs = 0
+    transactions.forEach(tx => {
+      const txDate = new Date(tx.date)
+      if (txDate >= startDate && txDate <= today && tx.type === "buy") {
+        const stock = stocks.find(s => s.id === tx.stock_id)
+        ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
+      }
+    })
+
+    // Build chart points
+    const points = []
+    const interval = range === "ytd" || range === "1y" ? "week" : range === "2y" || range === "3y" ? "month" : "quarter"
+
+    // Generate date points
+    const datePts = []
+    const d = new Date(startDate)
+    while (d <= today) {
+      datePts.push(new Date(d))
+      if (interval === "week")    d.setDate(d.getDate() + 7)
+      else if (interval === "month") d.setMonth(d.getMonth() + 1)
+      else                        d.setMonth(d.getMonth() + 3)
+    }
+    datePts.push(new Date(today))
+
+    datePts.forEach(dt => {
+      let total = 0
+      const acctVals = {}
+      const isToday = dt >= today
+      stocks.forEach(s => {
+        const sh = sharesAtDate(s.id, dt)
+        if (sh <= 0) return
+        // Use live price only for today's point, avg_cost for historical
+        // This shows actual invested cost over time, with today's market value at the end
+        const p = isToday
+          ? (prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0)
+          : (s.avg_cost ?? 0)
+        const val = toDisplay(p * sh, s.currency || "USD")
+        total += val
+        const acct = s.account_type || "Other"
+        acctVals[acct] = (acctVals[acct] || 0) + val
+      })
+
+      const label = dt.toLocaleDateString("en-CA", {month:"short", day:"numeric", year: range==="all"||range==="5y"?"2-digit":undefined})
+      const pt = { date: label, "Total Portfolio": Math.round(total) }
+      accts.forEach(a => { pt[a] = Math.round(acctVals[a] || 0) })
+      points.push(pt)
+    })
+
+    // Start value = first point
+    const startVal = points[0]?.["Total Portfolio"] || 0
+
+    return { startValue: startVal, ytdContributions: ytdContribs, chartData: points, accountNames: accts }
+  }, [stocks, prices, transactions, range, globalCurrency])
+
+  // YTD gain excluding contributions
+  const gainExContrib = currentTotal - startValue - ytdContributions
+  const gainExContribPct = startValue > 0 ? (gainExContrib / startValue) * 100 : 0
+
+  const RANGES = [
+    ["ytd","YTD"],["1y","1Y"],["2y","2Y"],["3y","3Y"],["5y","5Y"],["all","All"]
+  ]
 
   return (
     <Card className="bg-white">
@@ -187,139 +190,76 @@ export default function PortfolioPerformanceChart({ stocks = [], prices = {}, gl
             Portfolio Performance
             <span className="text-xs font-normal text-gray-400">({globalCurrency})</span>
           </CardTitle>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded border overflow-hidden text-xs">
-              {RANGES.map(([v, label]) => (
-                <button key={v} onClick={() => setRange(v)}
-                  className={cn("px-2 py-1 font-medium transition-colors",
-                    range===v ? "bg-gray-900 text-white" : "bg-white text-gray-400 hover:bg-gray-100")}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button onClick={loadHistory} disabled={loading}
-              className="text-gray-400 hover:text-gray-600 p-1 rounded transition-colors">
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            </button>
+          <div className="flex rounded border overflow-hidden text-xs">
+            {RANGES.map(([v,label]) => (
+              <button key={v} onClick={() => setRange(v)}
+                className={cn("px-2 py-1 font-medium transition-colors",
+                  range===v ? "bg-gray-900 text-white" : "bg-white text-gray-400 hover:bg-gray-100")}>
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Summary stats */}
-        <div className="flex gap-4 mt-1.5 flex-wrap items-end">
+        {/* Stats */}
+        <div className="flex gap-5 mt-1.5 flex-wrap">
           <div>
             <div className="text-xs text-gray-400">Current Value</div>
-            <div className="text-sm font-bold text-gray-900">
-              {new Intl.NumberFormat("en-CA",{style:"currency",currency:globalCurrency,maximumFractionDigits:0}).format(currentTotal)}
+            <div className="text-sm font-bold text-gray-900">{fmtCur(currentTotal, globalCurrency)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-400">Total Return (incl. contributions)</div>
+            <div className={cn("text-sm font-bold", totalGain>=0?"text-green-600":"text-red-500")}>
+              {totalGain>=0?"+":""}{fmtCur(totalGain, globalCurrency)} ({totalGainPct>=0?"+":""}{totalGainPct.toFixed(2)}%)
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-400">Total Return</div>
-            <div className={cn("text-sm font-bold", totalGain >= 0 ? "text-green-600" : "text-red-500")}>
-              {totalGain >= 0 ? "+" : ""}
-              {new Intl.NumberFormat("en-CA",{style:"currency",currency:globalCurrency,maximumFractionDigits:0}).format(totalGain)}
-              {" "}({totalGainPct >= 0 ? "+" : ""}{totalGainPct.toFixed(2)}%)
+            <div className="text-xs text-gray-400">
+              {range==="ytd"?"YTD":"Period"} gain excl. contributions {ytdContributions > 0 ? `(−${fmtLarge(ytdContributions)} contrib)` : ""}
+            </div>
+            <div className={cn("text-sm font-bold", gainExContrib>=0?"text-green-600":"text-red-500")}>
+              {gainExContrib>=0?"+":""}{fmtCur(gainExContrib, globalCurrency)} ({gainExContribPct>=0?"+":""}{gainExContribPct.toFixed(2)}%)
             </div>
           </div>
-          {loading && (
-            <div className="flex items-center gap-1 text-xs text-gray-400">
-              <Loader2 className="h-3 w-3 animate-spin" /> Loading...
-            </div>
-          )}
         </div>
 
-        {/* Clickable legend */}
-        {allLineKeys.length > 1 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {allLineKeys.map(key => {
-              const hidden = hiddenLines.has(key)
-              return (
-                <button
-                  key={key}
-                  onClick={() => toggleLine(key)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs font-medium transition-all",
-                    hidden
-                      ? "border-gray-200 text-gray-300 bg-white"
-                      : "border-transparent text-gray-700 bg-gray-100 hover:bg-gray-200"
-                  )}
-                >
-                  <span
-                    className="inline-block w-3 h-1.5 rounded-sm flex-shrink-0"
-                    style={{ background: hidden ? "#d1d5db" : lineColor(key) }}
-                  />
-                  {key}
-                </button>
-              )
-            })}
-            {hiddenLines.size > 0 && (
-              <button
-                onClick={() => setHiddenLines(new Set())}
-                className="text-xs text-blue-500 hover:text-blue-700 px-1"
-              >
-                Show all
-              </button>
-            )}
-          </div>
-        )}
+        {/* Legend */}
+        <div className="flex flex-wrap gap-2 mt-2">
+          {["Total Portfolio", ...accountNames].map((key,i) => (
+            <div key={key} className="flex items-center gap-1.5 text-xs text-gray-600">
+              <div className="w-3 h-1.5 rounded-sm" style={{background: COLORS[key] || "#6b7280"}}/>
+              {key}
+            </div>
+          ))}
+        </div>
       </CardHeader>
 
       <CardContent className="pt-1">
-        {stocks.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">
-            Add stocks to see portfolio performance.
-          </div>
-        ) : error ? (
-          <div className="text-center py-8 text-red-400 text-sm">{error}</div>
-        ) : chartData.length === 0 && loading ? (
-          <div className="h-52 flex items-center justify-center text-gray-300 text-sm">
-            <Loader2 className="h-5 w-5 animate-spin" />
-          </div>
+        {chartData.length === 0 ? (
+          <div className="text-center py-12 text-gray-400 text-sm">Add transactions to see portfolio performance.</div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chartData} margin={{ top:4, right:4, left:0, bottom:0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize:10, fill:"#9ca3af" }}
-                axisLine={false}
-                tickLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tick={{ fontSize:10, fill:"#9ca3af" }}
-                axisLine={false}
-                tickLine={false}
-                width={52}
-                tickFormatter={fmtLarge}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              {/* Total line */}
-              {!hiddenLines.has("Total Portfolio") && (
-                <Line
-                  type="monotone"
-                  dataKey="Total Portfolio"
-                  stroke={COLORS[0]}
-                  strokeWidth={2.5}
-                  dot={false}
-                  name="Total Portfolio"
-                />
-              )}
-              {/* Per-account lines */}
-              {showAccounts && accountNames.map((acct, i) =>
-                hiddenLines.has(acct) ? null : (
-                  <Line
-                    key={acct}
-                    type="monotone"
-                    dataKey={acct}
-                    stroke={COLORS[(i+1) % COLORS.length]}
-                    strokeWidth={1.5}
-                    strokeDasharray="4 2"
-                    dot={false}
-                    name={acct}
-                  />
-                )
-              )}
-            </LineChart>
+            <AreaChart data={chartData} margin={{top:4,right:4,left:0,bottom:0}}>
+              <defs>
+                {["Total Portfolio",...accountNames].map((key,i) => (
+                  <linearGradient key={key} id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={COLORS[key]||"#6b7280"} stopOpacity={0.15}/>
+                    <stop offset="95%" stopColor={COLORS[key]||"#6b7280"} stopOpacity={0.02}/>
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false}/>
+              <XAxis dataKey="date" tick={{fontSize:10,fill:"#9ca3af"}} axisLine={false} tickLine={false} interval="preserveStartEnd"/>
+              <YAxis tick={{fontSize:10,fill:"#9ca3af"}} axisLine={false} tickLine={false} width={58} tickFormatter={fmtLarge}/>
+              <Tooltip content={<CustomTooltip currency={globalCurrency}/>}/>
+              <Area type="monotone" dataKey="Total Portfolio" stroke={COLORS["Total Portfolio"]} strokeWidth={2.5}
+                fill="url(#grad-0)" dot={false}/>
+              {accountNames.map((acct,i) => (
+                <Area key={acct} type="monotone" dataKey={acct} stroke={COLORS[acct]||"#6b7280"}
+                  strokeWidth={1.5} strokeDasharray="4 2" fill={`url(#grad-${i+1})`}
+                  dot={false}/>
+              ))}
+            </AreaChart>
           </ResponsiveContainer>
         )}
       </CardContent>

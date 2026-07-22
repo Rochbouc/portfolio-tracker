@@ -13,7 +13,7 @@ import { Loader2, CheckCircle2, Plus, Trash2, Info } from "lucide-react";
 
 const schema = z.object({
   symbol:         z.string().min(1, "Symbol is required"),
-  name:           z.string().min(1, "Company name is required"),
+  name:           z.string().optional(),
   market:         z.string().optional(),
   shares:         z.coerce.number().positive("Must be positive"),
   avg_cost:       z.coerce.number().positive("Must be positive"),
@@ -145,11 +145,18 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
   const handleTickerSelect = async (sym, meta) => {
     setValue("symbol", sym, { shouldValidate: true });
     if (meta.name) setValue("name", meta.name);
-    const isCA = meta.market === "CA" || sym.endsWith(".TO") || sym.endsWith(".V");
-    const mkt = isCA ? "CA" : "US";
+    const isCrypto = meta.market === "CRYPTO" || /^(BTC|ETH|SOL|XRP|DOGE|ADA|DOT|AVAX)/.test(sym);
+    const isCA = !isCrypto && (meta.market === "CA" || sym.endsWith(".TO") || sym.endsWith(".V"));
+    const mkt = isCrypto ? "CRYPTO" : isCA ? "CA" : "US";
     setSelectedMarket(mkt);
     setValue("market", mkt);
-    setValue("currency", isCA ? "CAD" : "USD");
+    // Crypto: CAD if symbol ends in -CAD, otherwise USD
+    const cur = isCrypto ? (sym.endsWith("-CAD") ? "CAD" : "USD") : isCA ? "CAD" : "USD";
+    setValue("currency", cur);
+    if (isCrypto) {
+      setValue("sector", "Crypto");
+      setSelectedSector("Crypto");
+    }
     if (!sym) return;
 
     setQuoteLoading(true);
@@ -212,6 +219,7 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
   const onFormSubmit = async (data) => {
     await onSubmit({
       ...data,
+      name:         data.name || data.symbol,  // auto-fill name from symbol if blank
       account_type: selectedAccountType || data.account_type || "",
       sector:       selectedSector      || data.sector       || "",
       market:       selectedMarket      || data.market       || "US",
@@ -319,13 +327,13 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label className="text-gray-700 font-medium">Shares *</Label>
-              <Input type="number" step="0.0001" {...register("shares")} placeholder="100"
+              <Input type="number" step="0.000001" {...register("shares")} placeholder="100"
                 className="bg-white border-gray-300 text-gray-900" />
               {errors.shares && <p className="text-xs text-red-500">{errors.shares.message}</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-gray-700 font-medium">Avg Cost ({currency}) *</Label>
-              <Input type="number" step="0.01" {...register("avg_cost")} placeholder="0.00"
+              <Input type="number" step="0.000001" {...register("avg_cost")} placeholder="0.00"
                 className="bg-white border-gray-300 text-gray-900" />
               {errors.avg_cost && <p className="text-xs text-red-500">{errors.avg_cost.message}</p>}
             </div>
@@ -339,7 +347,7 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-gray-700 font-medium">Current Price ({currency})</Label>
-              <Input type="number" step="0.01" {...register("current_price")} placeholder="Auto-fetched"
+              <Input type="number" step="0.000001" {...register("current_price")} placeholder="Auto-fetched"
                 className="bg-white border-gray-300 text-gray-900" />
             </div>
             <div className="space-y-1.5">

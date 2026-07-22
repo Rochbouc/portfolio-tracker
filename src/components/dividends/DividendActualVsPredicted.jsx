@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Loader2, RefreshCw, TrendingUp } from "lucide-react"
 import { Stock } from "@/api/localData"
@@ -16,20 +17,27 @@ function isCoveredCallOrMonthly(symbol, name) {
   )
 }
 
-function buildProjected(enrichedStocks, dividends) {
+function buildProjected(enrichedStocks, dividends, globalCurrency = "CAD") {
   const now = new Date()
   const projected = {}
+  const USD_CAD = getRate()
+  const currentYear = now.getFullYear()
 
   enrichedStocks.forEach(stock => {
-    const annualTotal = stock._annualTotal
+    let annualTotal = stock._annualTotal
     if (!annualTotal || annualTotal <= 0) return
+
+    // Convert to display currency
+    const cur = stock.currency || "CAD"
+    if (globalCurrency === "CAD" && cur === "USD") annualTotal = annualTotal * USD_CAD
+    if (globalCurrency === "USD" && cur === "CAD") annualTotal = annualTotal / USD_CAD
 
     const hist = dividends
       .filter(d => d.stock_id === stock.id && d.date)
-      .map(d => new Date(d.date))
+      .map(d => new Date(d.date + "T12:00:00"))
       .sort((a, b) => a - b)
 
-    let freq = stock._frequency || (isCoveredCallOrMonthly(stock.symbol, stock.name) ? 12 : 4)
+    let freq = stock._frequency || 4
     if (hist.length >= 2) {
       const diffs = []
       for (let i = 1; i < hist.length; i++)
@@ -43,71 +51,47 @@ function buildProjected(enrichedStocks, dividends) {
       else                 freq = 1
     }
 
-    const amtPer     = annualTotal / freq
-    const isWeekly   = freq >= 50
-    const moStep     = freq >= 11 ? 1 : freq >= 3 ? 3 : freq >= 1.5 ? 6 : 12
-    const payMonths  = stock._payMonths || null  // e.g. [1,4,7,10] for Jan/Apr/Jul/Oct
-    const payDay     = stock._payDay    || 15
+    const amtPer    = annualTotal / freq
+    const payMonths = stock._payMonths || null
+    const payDay    = stock._payDay    || 15
+    const isWeekly  = freq >= 50
+    const isMonthly = freq >= 11
+    const moStep    = isMonthly ? 1 : freq >= 3 ? 3 : freq >= 1.5 ? 6 : 12
 
-    const cutoff = new Date(now.getFullYear(), now.getMonth() + 13, 1)
+    // Generate for full current year (Jan-Dec) plus a few months ahead
+    const yearStart = new Date(currentYear, 0, 1)
+    const cutoff    = new Date(currentYear, 12, 1)  // end of current year
 
-    if (isWeekly) {
-      // Weekly: start from last actual or next Friday
-      let next
-      if (hist.length > 0) {
-        next = new Date(hist[hist.length-1].getTime() + 7*86400000)
-        while (next <= now) next = new Date(next.getTime() + 7*86400000)
-      } else {
-        next = new Date(now)
-        next.setDate(next.getDate() + ((5-next.getDay()+7)%7||7))
-      }
-      let cur = new Date(next), safety = 0
+    const addKey = (date) => {
+      if (date.getFullYear() !== currentYear) return
+      const key = `${currentYear}-${String(date.getMonth()+1).padStart(2,"0")}`
+      projected[key] = (projected[key] || 0) + amtPer
+    }
+
+    if (payMonths) {
+      // Known pay months — add all occurrences in current year
+      payMonths.forEach(mo => {
+        addKey(new Date(currentYear, mo - 1, payDay))
+      })
+    } else if (isWeekly) {
+      // Weekly — every 7 days through the year
+      let cur = new Date(currentYear, 0, 7), safety = 0
       while (cur < cutoff && safety < 600) {
+        addKey(cur)
+        cur = new Date(cur.getTime() + 7 * 86400000)
         safety++
-        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,"0")}`
-        projected[key] = (projected[key] || 0) + amtPer
-        cur = new Date(cur.getTime() + 7*86400000)
-      }
-    } else if (payMonths && hist.length === 0) {
-      // Use known payment months — generate every occurrence in the next 13 months
-      const curDate = new Date(now)
-      for (let offset = 0; offset <= 13; offset++) {
-        const checkDate = new Date(curDate.getFullYear(), curDate.getMonth() + offset, 1)
-        const mo = checkDate.getMonth() + 1  // 1-12
-        if (payMonths.includes(mo) && checkDate > now) {
-          const key = `${checkDate.getFullYear()}-${String(mo).padStart(2,"0")}`
-          projected[key] = (projected[key] || 0) + amtPer
-        }
       }
     } else {
-      // Month-step based (use last actual or quarterly default)
-      let next
-      if (hist.length > 0) {
-        const last = hist[hist.length-1]
-        next = new Date(last.getFullYear(), last.getMonth() + moStep, payDay)
-        while (next <= now) next = new Date(next.getFullYear(), next.getMonth() + moStep, payDay)
-      // Start from THIS month if pay day hasn't passed yet, else next month
-      const thisMonthPay = new Date(now.getFullYear(), now.getMonth(), payDay)
-      next = thisMonthPay > now ? thisMonthPay : new Date(now.getFullYear(), now.getMonth() + 1, payDay)
-        next = new Date(now.getFullYear(), now.getMonth() + 1, payDay)
-      } else {
-        // quarterly fallback — spread across different quarters
-        const qm = [0,3,6,9]
-        const nm = qm.find(m => m > now.getMonth())
-        next = nm != null ? new Date(now.getFullYear(), nm, payDay)
-                          : new Date(now.getFullYear()+1, 0, payDay)
-      }
-      let cur = new Date(next), safety = 0
-      while (cur < cutoff && safety < 200) {
-        safety++
-        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,"0")}`
-        projected[key] = (projected[key] || 0) + amtPer
-        cur = new Date(cur.getFullYear(), cur.getMonth() + moStep, payDay)
+      // Month-step: spread evenly through the year based on freq
+      // Start from Jan and add every moStep months
+      for (let mo = moStep - 1; mo < 12; mo += moStep) {
+        addKey(new Date(currentYear, mo, payDay))
       }
     }
   })
   return projected
 }
+
 
 // Load Chart.js once, return promise
 let chartJsPromise = null
@@ -144,13 +128,13 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
       for (const [id, data] of Object.entries(fetched)) {
         if (data.annualTotal > 0 || data.yieldPct > 0) {
           await Stock.update(id, {
-            annual_dividend: parseFloat((data.annualTotal || 0).toFixed(4)),
+            annual_dividend: parseFloat((data.annualRatePerShare || 0).toFixed(6)),
             dividend_yield:  parseFloat((data.yieldPct   || 0).toFixed(4)),
           }).catch(() => {})
         }
       }
       const result = stocks.map(stock => {
-        let annualTotal = parseFloat(stock.annual_dividend) || 0
+        let annualTotal = (parseFloat(stock.annual_dividend) || 0) * (stock.shares || 0)
         let yieldPct    = parseFloat(stock.dividend_yield)  || 0
         let frequency   = 4
         const fd = fetched[stock.id]
@@ -179,26 +163,25 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
   useEffect(() => { enrich() }, [stocks.map(s => s.id).sort().join(",")])
 
   const projectedByMonth = useMemo(
-    () => buildProjected(enrichedStocks, dividends),
-    [enrichedStocks, dividends]
+    () => buildProjected(enrichedStocks, dividends, globalCurrency),
+    [enrichedStocks, dividends, globalCurrency]
   )
 
   const actualByMonth = useMemo(() => {
     const map = {}
+    const USD_CAD = getRate()
     dividends.forEach(d => {
-      if (!d.stock_id) return  // skip cash/sold entries
-      const dt  = new Date(d.date)
-      const key = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`
+      if (!d.date) return
+      const key = d.date.slice(0,7)  // "2026-01"
       const stock = stocks.find(s => s.id === d.stock_id)
-      const cur = d.currency || stock?.currency || "USD"
-      const USD_CAD = 1.37
+      const cur = d.currency || stock?.currency || "CAD"
       const converted = (globalCurrency === "CAD" && cur === "USD") ? (d.amount||0) * USD_CAD
         : (globalCurrency === "USD" && cur === "CAD") ? (d.amount||0) / USD_CAD
         : (d.amount||0)
-      map[key] = (map[key] || 0) + converted
+      if (key) map[key] = (map[key] || 0) + converted
     })
     return map
-  }, [dividends])
+  }, [dividends, globalCurrency, stocks])
 
   // Build one entry per month, no duplicates
   const { labels, actualData, predictedData, todayIdx } = useMemo(() => {
@@ -215,9 +198,10 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
         cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
       }
     } else {
-      for (let i = -5; i <= 12; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
-        keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`)
+      // Show only current year Jan-Dec (12 months)
+      const yr = now.getFullYear()
+      for (let i = 0; i < 12; i++) {
+        keys.push(`${yr}-${String(i+1).padStart(2,"0")}`)
       }
     }
 
@@ -271,7 +255,7 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
               backgroundColor: "#1d6fa4",
               borderRadius: { topLeft: 3, topRight: 0, bottomLeft: 0, bottomRight: 0 },
               borderSkipped: false,
-              categoryPercentage: 0.7,
+              categoryPercentage: 1.0,
               barPercentage: 1.0,
             },
             {
@@ -280,7 +264,7 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
               backgroundColor: "#f97316",
               borderRadius: { topLeft: 0, topRight: 3, bottomLeft: 0, bottomRight: 0 },
               borderSkipped: false,
-              categoryPercentage: 0.7,
+              categoryPercentage: 1.0,
               barPercentage: 1.0,
             }
           ]
@@ -308,7 +292,7 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
                 color: "#9ca3af",
                 maxRotation: 0,
                 autoSkip: true,
-                maxTicksLimit: 18,
+                maxTicksLimit: 12,
               }
             },
             y: {
@@ -350,7 +334,7 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
           </CardTitle>
           <div className="flex items-center gap-2">
             <div className="flex rounded border overflow-hidden text-xs">
-              {[["12mo","±18 months"],["all","All Time"]].map(([v, lbl]) => (
+              {[["12mo","12 Months (This Year)"],["all","All Time"]].map(([v, lbl]) => (
                 <button key={v} onClick={() => setViewMode(v)}
                   className={cn("px-2.5 py-1 font-medium transition-colors",
                     viewMode===v ? "bg-gray-900 text-white" : "bg-white text-gray-400 hover:bg-gray-100")}>

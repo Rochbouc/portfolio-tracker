@@ -7,13 +7,15 @@ echo   Portfolio Tracker - Push Update to GitHub
 echo  ============================================
 echo.
 
-git add . >nul 2>&1
-git commit -m "Update portfolio tracker" >nul 2>&1
+git config gc.auto 0
+git config gc.autopacklimit 0
+git add .
+git commit -m "Update portfolio tracker"
 git push
 
 if %errorlevel% neq 0 (
     echo.
-    echo  [!] Push failed - run INSTALL.bat first if this is a new machine.
+    echo  [!] Push failed - try: git push --force
     pause
     exit /b 1
 )

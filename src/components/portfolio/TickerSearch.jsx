@@ -36,7 +36,8 @@ export default function TickerSearch({ value, onChange, placeholder = "Search sy
     try {
       const found = await searchTickers(q);
       setResults(found);
-      setOpen(found.length > 0);
+      // Keep open even with no results so user sees the "press Enter" hint
+      setOpen(true);
       setHighlighted(0);
     } catch {
       setResults([]);
@@ -72,6 +73,23 @@ export default function TickerSearch({ value, onChange, placeholder = "Search sy
   };
 
   const handleKeyDown = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (results.length > 0 && results[highlighted]) {
+        selectResult(results[highlighted]);
+      } else if (query.trim()) {
+        // Manual entry — use typed symbol directly (for crypto, obscure tickers, etc.)
+        const sym = query.trim().toUpperCase();
+        const isCrypto = meta.market === "CRYPTO" || /^(BTC|ETH|SOL|XRP|DOGE|ADA|DOT|AVAX)/.test(sym);
+        onChange(sym, {
+          name: isCrypto ? (sym.split("-")[0] === "BTC" ? "Bitcoin" : sym.split("-")[0] === "ETH" ? "Ethereum" : sym.split("-")[0]) : sym,
+          market: isCrypto ? "CRYPTO" : "US",
+          exchange: isCrypto ? "CRYPTO" : "",
+        });
+        setOpen(false);
+      }
+      return;
+    }
     if (!open) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -79,9 +97,6 @@ export default function TickerSearch({ value, onChange, placeholder = "Search sy
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlighted(h => Math.max(h - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (results[highlighted]) selectResult(results[highlighted]);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
@@ -165,7 +180,13 @@ export default function TickerSearch({ value, onChange, placeholder = "Search sy
 
       {open && results.length === 0 && !loading && query.length > 1 && (
         <div className="absolute z-50 mt-1 w-full bg-white border border-border rounded-md shadow-lg px-3 py-3 text-sm text-muted-foreground">
-          No results found for "{query}"
+          <div>No results found for "{query}"</div>
+          <div className="mt-1.5 text-xs text-blue-600 font-medium">
+            Press <kbd className="px-1 py-0.5 bg-gray-100 rounded text-gray-700">Enter</kbd> to add "{query.toUpperCase()}" manually
+            {/^(BTC|ETH|SOL|XRP|DOGE)/.test(query.toUpperCase()) && (
+              <span className="ml-1 text-amber-600">— crypto detected, will use CAD price if format is BTC-CAD</span>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -108,7 +109,7 @@ function EditDividendDialog({ dividend, stocks, open, onOpenChange, onSave }) {
 export default function DividendList({ dividends = [], stocks = [], onDelete, onEdit, globalCurrency = "CAD" }) {
   const [editingDiv, setEditingDiv] = useState(null)
   const [search,     setSearch]     = useState("")
-  const USD_CAD = 1.37
+  const USD_CAD = getRate()
 
   const getStockCurrency = (d) => d.currency || stocks.find(s => s.id === d.stock_id)?.currency || "USD"
   const getSym = id => {

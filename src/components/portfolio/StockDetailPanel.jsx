@@ -125,7 +125,7 @@ export default function StockDetailPanel({ stock, quote, onClose }) {
   const marketValue = livePrice * stock.shares;
   const gainLoss    = marketValue - costBasis;
   const returnPct   = costBasis > 0 ? (gainLoss / costBasis) * 100 : 0;
-  const annualIncome = stock.annual_dividend
+  const annualIncome = (stock.annual_dividend || 0) * (stock.shares || 0)
     ? parseFloat(stock.annual_dividend)
     : stock.dividend_yield
     ? livePrice * stock.shares * (parseFloat(stock.dividend_yield) / 100)

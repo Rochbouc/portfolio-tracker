@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Loader2, X } from "lucide-react"
 import { getDividendDataBatch } from "@/api/dividendData"
@@ -219,7 +220,7 @@ function EventChip({ e }) {
 
 // ── Main component ────────────────────────────────────────────────
 export default function DividendCalendarView({ dividends=[], stocks=[], globalCurrency="CAD" }) {
-  const USD_CAD = 1.37
+  const USD_CAD = getRate()
   const convertAmt = (amount, currency) => {
     if (globalCurrency === "CAD" && currency === "USD") return amount * USD_CAD
     if (globalCurrency === "USD" && currency === "CAD") return amount / USD_CAD

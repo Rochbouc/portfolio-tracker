@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { getRate } from "@/api/rateContext"
 import { Stock, Transaction, Dividend, CashPosition, adjustCash, setCash, deleteCash } from "@/api/localData";
-import { fetchQuote, searchTickers } from "@/api/stockSearch";
+import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
 import { getPaySchedule } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
 import { logout } from "@/components/auth/Login";
@@ -13,8 +14,8 @@ import StockDetailPanel from "@/components/portfolio/StockDetailPanel";
 import ClosedPositions from "@/components/portfolio/ClosedPositions";
 import Watchlist from "@/components/portfolio/Watchlist";
 import AccountSummary from "@/components/analytics/AccountSummary";
-import ProjectionAt60 from "@/components/analytics/ProjectionAt60";
-import { DraggableTabBar, Widget, WidgetGrid, loadTabOrder, saveTabOrder } from "@/components/layout/DashboardLayout";
+import PositionSummary from "@/components/analytics/PositionSummary";
+import { Widget, WidgetGrid, WidgetErrorBoundary } from "@/components/layout/DashboardLayout";
 import AddStockForm from "@/components/portfolio/AddStockForm";
 import DataBackup from "@/components/portfolio/DataBackup";
 import AddTransactionForm from "@/components/transactions/AddTransactionForm";
@@ -31,6 +32,7 @@ import ImportStocks from "@/components/settings/ImportStocks";
 import TFSATracker from "@/components/settings/TFSATracker";
 import YearOverYear from "@/components/analytics/YearOverYear";
 import HistoricalDividends from "@/components/analytics/HistoricalDividends";
+import ProjectionAt60 from "@/components/analytics/ProjectionAt60";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend as RLegend } from "recharts";
 import { RefreshCw, Plus, Receipt, Coins, TrendingUp, ChevronDown, ChevronUp, Bell, Briefcase, Wallet, Loader2, Send, Search, DollarSign, Pencil, LogOut, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -60,27 +62,33 @@ function groupByAccount(stocks) {
 }
 
 // ── Monthly Dividend Chart ─────────────────────────────────────────
-function MonthlyDividendChart({ dividends, stocks }) {
-  const year = new Date().getFullYear();
-  const [divCurrency, setDivCurrency] = useState("USD");
-  const CAD_USD = 0.73;
-  const USD_CAD = 1.37;
+function MonthlyDividendChart({ dividends, stocks, totalDividendsReceived }) {
+  const year = new Date().getFullYear()
+  const [divCurrency, setDivCurrency] = useState("CAD")
+  const CAD_USD = 0.73
+  const USD_CAD = getRate()
 
   const monthly = Array.from({ length: 12 }, (_, i) => ({
     month: new Date(2024, i).toLocaleString("default", { month: "short" }),
     amount: 0,
-  }));
+  }))
   dividends.forEach(d => {
-    const dt = new Date(d.date);
-    if (dt.getFullYear() !== year) return;
-    const stock = stocks?.find(s => s.id === d.stock_id);
-    const stockCur = stock?.currency || "USD";
-    let amt = d.amount || 0;
-    if (divCurrency === "USD" && stockCur === "CAD") amt = amt * CAD_USD;
-    else if (divCurrency === "CAD" && stockCur === "USD") amt = amt * USD_CAD;
-    monthly[dt.getMonth()].amount += amt;
-  });
-  const total = monthly.reduce((s, m) => s + m.amount, 0);
+    if (!d.date) return
+    // Use string slice to avoid timezone issues
+    if (d.date.slice(0,4) !== String(year)) return
+    const monthIdx = parseInt(d.date.slice(5,7), 10) - 1  // 0-based
+    if (monthIdx < 0 || monthIdx > 11) return
+    const stock = stocks?.find(s => s.id === d.stock_id)
+    const stockCur = d.currency || stock?.currency || "CAD"
+    let amt = d.amount || 0
+    if (divCurrency === "USD" && stockCur === "CAD") amt = amt * CAD_USD
+    else if (divCurrency === "CAD" && stockCur === "USD") amt = amt * USD_CAD
+    monthly[monthIdx].amount += amt
+  })
+  // Use totalDividendsReceived from main page if available (matches the main card)
+  const total = divCurrency === "CAD" && totalDividendsReceived != null
+    ? totalDividendsReceived
+    : monthly.reduce((s, m) => s + m.amount, 0)
   return (
     <Card className="mb-4">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -126,12 +134,30 @@ function MonthlyDividendChart({ dividends, stocks }) {
 
 // ── Price Alerts ───────────────────────────────────────────────────
 function PriceAlertsPanel() {
-  const [alerts, setAlerts]       = useState(() => { try { return JSON.parse(localStorage.getItem("price_alerts") || "[]") } catch { return [] } });
+  const [alerts, setAlerts] = useState(() => { try { return JSON.parse(localStorage.getItem("price_alerts") || "[]") } catch { return [] } });
   const [symbol, setSymbol]       = useState("");
   const [condition, setCondition] = useState("above");
   const [targetPrice, setTarget]  = useState("");
   const [adding, setAdding]       = useState(false);
   const [triggered, setTriggered] = useState({});
+
+  // Sync with Watchlist — reload alerts when storage changes
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key === "price_alerts") {
+        try { setAlerts(JSON.parse(e.newValue || "[]")) } catch {}
+      }
+    }
+    window.addEventListener("storage", onStorage)
+    // Also poll every 2s in case Watchlist is on same tab
+    const id = setInterval(() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem("price_alerts") || "[]")
+        setAlerts(prev => JSON.stringify(prev) !== JSON.stringify(stored) ? stored : prev)
+      } catch {}
+    }, 2000)
+    return () => { window.removeEventListener("storage", onStorage); clearInterval(id) }
+  }, []);
 
   function saveAlerts(list) { localStorage.setItem("price_alerts", JSON.stringify(list)); setAlerts(list); }
 
@@ -716,7 +742,13 @@ function AIAssistantPanel() {
 // ── Main Dashboard ─────────────────────────────────────────────────
 // ── Exchange Rate Widget ──────────────────────────────────────────
 function ExchangeRateWidget() {
-  const [rate,    setRate]    = useState(1.37)
+  const [rate,    setRate]    = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("usd_cad_rate_v1"))
+      if (saved?.rate && saved.rate > 1.0 && saved.rate < 2.0) return saved.rate
+    } catch {}
+    return 1.40  // fallback until live rate fetched
+  })
   const [live,    setLive]    = useState(null)
   const [loading, setLoading] = useState(false)
   const [lastUpd, setLastUpd] = useState(null)
@@ -740,7 +772,9 @@ function ExchangeRateWidget() {
           const r = data?.chart?.result?.[0]?.meta?.regularMarketPrice
           if (r && r > 0) {
             setLive(r); setRate(r); setLastUpd(new Date().toLocaleTimeString())
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ rate: r, ts: new Date().toLocaleTimeString() }))
+            const val = JSON.stringify({ rate: r, ts: new Date().toLocaleTimeString() })
+            localStorage.setItem(STORAGE_KEY, val)
+            window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY, newValue: val }))
             break
           }
         } catch {}
@@ -756,7 +790,9 @@ function ExchangeRateWidget() {
     const n = parseFloat(draft)
     if (!isNaN(n) && n > 0) {
       setRate(n); setLive(null)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rate: n, ts: "manual" }))
+      const val = JSON.stringify({ rate: n, ts: "manual" })
+      localStorage.setItem(STORAGE_KEY, val)
+      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY, newValue: val }))
     }
     setEditMode(false)
   }
@@ -821,17 +857,26 @@ function DashboardInner() {
   const [dividends, setDividends] = useState([]);
   const [prices, setPrices] = useState({});
   const [refreshing, setRefreshing] = useState(false);
+  const [rate, setRate] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("usd_cad_rate_v1"))
+      if (saved?.rate && saved.rate > 1.0 && saved.rate < 2.0) return saved.rate
+    } catch {}
+    return 1.40
+  });
   const [showAddStock, setShowAddStock] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
   const [showAddDiv, setShowAddDiv] = useState(false);
   const [editingStock, setEditingStock] = useState(null);
   const [expandedStock, setExpandedStock] = useState(null);
+  const [holdingSearch, setHoldingSearch] = useState("");
   const [expandedAccount, setExpandedAccount] = useState({});
   const [accountCurrency, setAccountCurrency] = useState({});
   const [activeTab, setActiveTab] = useState("holdings");
   const [tabOrder,  setTabOrder]  = useState(() => {
     const defaults = [
       { id:"holdings",    label:"Holdings" },
+      { id:"positions",   label:"Positions" },
       { id:"watchlist",   label:"Watchlist" },
       { id:"closed",      label:"Closed" },
       { id:"dividends",   label:"Dividends" },
@@ -844,14 +889,16 @@ function DashboardInner() {
       { id:"projection",  label:"Projection at 60" },
       { id:"settings",    label:"Settings" },
     ]
-    const saved = loadTabOrder()
-    if (!saved || saved.length === 0) return defaults
-    const savedIds = saved.map(t => t.id)
-    const newTabs  = defaults.filter(t => !savedIds.includes(t.id))
-    return [...saved, ...newTabs]
+    try {
+      const saved = JSON.parse(localStorage.getItem("tab_order") || "null")
+      if (!saved || saved.length === 0) return defaults
+      const savedIds = saved.map(t => t.id)
+      const newTabs  = defaults.filter(t => !savedIds.includes(t.id))
+      return [...saved, ...newTabs]
+    } catch { return defaults }
   });
 
-  function handleReorderTabs(newOrder) { setTabOrder(newOrder); saveTabOrder(newOrder); }
+  function handleReorderTabs(newOrder) { setTabOrder(newOrder); localStorage.setItem("tab_order", JSON.stringify(newOrder)); }
   const [cashPositions, setCashPositions] = useState([]);
   const [globalCurrency, setGlobalCurrency] = useState("CAD");
   const [showCashModal, setShowCashModal] = useState(false);
@@ -860,14 +907,21 @@ function DashboardInner() {
 
   const loadAll = useCallback(async () => {
     const [s, t, d, cp] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list()]);
-    // Backfill currency on old dividend records saved without it — persist fix
-    const fixed = await Promise.all(d.map(async div => {
-      if (div.currency) return div;
+    // Force-correct currency on all dividend records using stock as source of truth
+    const fixed = d.map(div => {
+      if (!div.stock_id) return div;  // cash entries keep their stored currency
       const stock = s.find(st => st.id === div.stock_id);
-      const cur = stock?.currency || "USD";
-      await Dividend.update(div.id, { ...div, currency: cur }).catch(() => {});
-      return { ...div, currency: cur };
-    }));
+      if (!stock) return div;
+      // Stock currency is authoritative — override wrong stored value
+      const correctCur = stock.currency || "USD";
+      if (div.currency === correctCur) return div;
+      return { ...div, currency: correctCur };
+    });
+    // Persist corrected records back to storage
+    const toFix = fixed.filter((div, i) => div.currency !== d[i].currency);
+    if (toFix.length > 0) {
+      await Promise.all(toFix.map(div => Dividend.update(div.id, div).catch(() => {})));
+    }
     setStocks(s); setTransactions(t); setDividends(fixed); setCashPositions(cp);
   }, []);
 
@@ -876,6 +930,11 @@ function DashboardInner() {
   const refreshPrices = useCallback(async () => {
     if (stocks.length === 0) return;
     setRefreshing(true);
+    try {
+      // Fetch live USD/CAD rate first
+      const liveRate = await fetchUSDCADRate();
+      if (liveRate) setRate(liveRate);
+    } catch {}
     try {
       const entries = await Promise.all(stocks.map(async s => {
         const q = await fetchQuote(s.symbol, s);
@@ -887,6 +946,20 @@ function DashboardInner() {
   }, [stocks]);
 
   useEffect(() => { if (stocks.length > 0 && Object.keys(prices).length === 0) refreshPrices(); }, [stocks]);
+  // Sync rate from ExchangeRateWidget (Settings) via localStorage
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key === "usd_cad_rate_v1") {
+        try {
+          const saved = JSON.parse(e.newValue)
+          if (saved?.rate && saved.rate > 1.0 && saved.rate < 2.0) setRate(saved.rate)
+        } catch {}
+      }
+    }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
+  }, [])
+
   // Always auto-refresh every 60 seconds
   useEffect(() => {
     if (stocks.length === 0) return;
@@ -896,7 +969,7 @@ function DashboardInner() {
 
   // Exchange rate approximation (live rates would need an API key)
   const CAD_USD = 0.73;  // 1 CAD = 0.73 USD
-  const USD_CAD = 1.37;  // 1 USD = 1.37 CAD
+  const USD_CAD = rate;  // live rate fetched from Yahoo Finance
 
   function toGlobalCurrency(amount, stockCurrency) {
     if (!amount) return 0;
@@ -924,24 +997,49 @@ function DashboardInner() {
   const totalGain = totalValue - totalCost + currentYearContribs;
   const totalGainPct = (totalCost - currentYearContribs) > 0 ? (totalGain / (totalCost - currentYearContribs)) * 100 : 0;
   const thisYear = new Date().getFullYear();
-  // All-time dividend totals — stock entries only (exclude cash/MISC with no stock_id)
+  // All-time dividend totals — all entries including cash
   const totalDividendsCAD = dividends.reduce((s, d) => {
-    if (!d.stock_id) return s  // skip cash entries
-    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "CAD";
     return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
   }, 0);
   const totalDividendsUSD = dividends.reduce((s, d) => {
-    if (!d.stock_id) return s  // skip cash entries
-    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "CAD";
     return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
   }, 0);
+  // Historical dividends from past years (manual entries in Dividend History tab + archives)
+  const historicalDivTotal = useMemo(() => {
+    try {
+      const rate = USD_CAD  // live rate
+      let total = 0
+      // From Dividend History tab — key is "SYMBOL|ACCOUNT", value is {year: amount}
+      // Use stockCurrencyMap to determine if each entry is USD or CAD
+      const hist = JSON.parse(localStorage.getItem("historical_dividends_per_stock_v2") || "{}")
+      Object.entries(hist).forEach(([key, yearMap]) => {
+        // key = "SYMBOL|ACCOUNT" e.g. "TD|RRSP" or "SCHD|RRSP"
+        const [sym, acct] = key.split("|")
+        const stock = stocks.find(s => s.symbol === sym && s.account_type === acct)
+        const cur = stock?.currency || "CAD"
+        Object.values(yearMap).forEach(amt => {
+          const n = parseFloat(amt) || 0
+          total += cur === "USD" ? n * rate : n
+        })
+      })
+      // From year-end archives (already split CAD/USD)
+      const archive = JSON.parse(localStorage.getItem("dividend_archive") || "{}")
+      Object.values(archive).forEach(yr => {
+        total += (yr.CAD || 0) + (yr.USD || 0) * rate
+      })
+      return total
+    } catch { return 0 }
+  }, [stocks, USD_CAD]);
   // Current year only — stock entries only
-  const thisYearDivsCAD = dividends.filter(d => d.stock_id && new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
-    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+  // Current year — ALL dividends including cash (for main card total)
+  const thisYearDivsCAD = dividends.filter(d => d.date?.slice(0,4) === String(thisYear)).reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "CAD";
     return s + (cur === "CAD" ? (d.amount||0) : (d.amount||0) * USD_CAD);
   }, 0);
-  const thisYearDivsUSD = dividends.filter(d => d.stock_id && new Date(d.date).getFullYear() === thisYear).reduce((s, d) => {
-    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD";
+  const thisYearDivsUSD = dividends.filter(d => d.date?.slice(0,4) === String(thisYear)).reduce((s, d) => {
+    const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "CAD";
     return s + (cur === "USD" ? (d.amount||0) : (d.amount||0) / USD_CAD);
   }, 0);
   const totalDividendsReceived = globalCurrency === "CAD" ? thisYearDivsCAD : thisYearDivsUSD;
@@ -950,20 +1048,19 @@ function DashboardInner() {
   const thisYearByAccount = useMemo(() => {
     const map = {}  // { RRSP: { CAD: 0, USD: 0, cashCAD: 0, cashUSD: 0 }, ... }
     dividends
-      .filter(d => new Date(d.date).getFullYear() === thisYear)
+      .filter(d => d.date?.slice(0,4) === String(thisYear))
       .forEach(d => {
         const stock  = stocks.find(s => s.id === d.stock_id)
-        const isCash = !d.stock_id   // cash/sold entry — exclude from CAD/USD stock totals
+        const isCash = !d.stock_id
         const acct   = d.account_type || stock?.account_type || "Other"
-        const cur    = d.currency || stock?.currency || "USD"
+        // Use stored currency first, then stock currency — never default to USD for CAD stocks
+        const cur    = d.currency || stock?.currency || (stock?.market === "TSE" || stock?.market === "CA" ? "CAD" : "USD")
         const amt    = d.amount || 0
         if (!map[acct]) map[acct] = { CAD: 0, USD: 0, cashCAD: 0, cashUSD: 0 }
         if (isCash) {
-          // Cash entries go ONLY in the cash bucket
           if (cur === "CAD") map[acct].cashCAD += amt
           else               map[acct].cashUSD += amt
         } else {
-          // Real stock entries go in CAD or USD bucket
           if (cur === "CAD") map[acct].CAD += amt
           else               map[acct].USD += amt
         }
@@ -973,13 +1070,13 @@ function DashboardInner() {
 
   // CAD vs USD split for current year (native amounts, not converted)
   const thisYearNativeCAD = dividends
-    .filter(d => new Date(d.date).getFullYear() === thisYear)
+    .filter(d => d.date?.slice(0,4) === String(thisYear))
     .reduce((s, d) => {
       const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD"
       return cur === "CAD" ? s + (d.amount||0) : s
     }, 0)
   const thisYearNativeUSD = dividends
-    .filter(d => new Date(d.date).getFullYear() === thisYear)
+    .filter(d => d.date?.slice(0,4) === String(thisYear))
     .reduce((s, d) => {
       const cur = d.currency || stocks.find(st => st.id === d.stock_id)?.currency || "USD"
       return cur === "USD" ? s + (d.amount||0) : s
@@ -999,8 +1096,17 @@ function DashboardInner() {
     return byAcct
   }, [dividends, thisYear])
 
+  // RRSP/TFSA contribution data from Settings
+  const contributionData = useMemo(() => {
+    try {
+      const data = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
+      const yr = new Date().getFullYear()
+      return { year: yr, RRSP: data[yr]?.RRSP || {}, TFSA: data[yr]?.TFSA || {}, room: data.room || {} }
+    } catch { return { year: new Date().getFullYear(), RRSP: {}, TFSA: {}, room: {} } }
+  }, [])
+
   const estAnnualDividends = stocks.reduce((s, st) =>
-    s + toGlobalCurrency(parseFloat(st.annual_dividend) || 0, st.currency || "USD"), 0);
+    s + toGlobalCurrency((parseFloat(st.annual_dividend) || 0) * (st.shares || 0), st.currency || "USD"), 0);
 
   // ── Pending dividend suggestions ──────────────────────────────────
   // Finds stocks with a payment due in the past 14 days not yet recorded
@@ -1009,7 +1115,8 @@ function DashboardInner() {
     const suggestions = [];
     stocks.forEach(st => {
       if (!st.shares || st.shares <= 0) return;
-      const annualDiv = parseFloat(st.annual_dividend) || 0;
+      const annualDivPerShare = parseFloat(st.annual_dividend) || 0;
+      const annualDiv = annualDivPerShare * (st.shares || 0);  // total annual
       if (annualDiv <= 0) return;
       const sched      = getPaySchedule(st.symbol);
       const freq       = sched?.frequency || 4;
@@ -1079,33 +1186,33 @@ function DashboardInner() {
   const handleEditStock = (stock) => { setEditingStock(stock); setShowAddStock(true); };
   const handleAddTransaction = async (data) => {
     await Transaction.create(data);
-    // Update stock holdings
     const stock = stocks.find(s => s.id === data.stock_id);
     if (stock) {
-      const txValue = data.shares * data.price;
-      const acct = data.account_type || stock.account_type || "Unassigned";
-      const cur = stock.currency || "USD";
+      const txValue = parseFloat((data.shares * data.price).toFixed(2));
+      const acct    = data.account_type || stock.account_type || "Unassigned";
+      const cur     = stock.currency || "USD";
       if (data.type === "buy") {
-        // Deduct cash for purchase
+        // Deduct cash for purchase — creates cash position if needed
         await adjustCash(acct, cur, -txValue);
-        // Update stock shares and avg cost
-        const newShares = stock.shares + data.shares;
+        const newShares  = (stock.shares || 0) + data.shares;
         const newAvgCost = ((stock.shares * stock.avg_cost) + txValue) / newShares;
-        await Stock.update(stock.id, { shares: newShares, avg_cost: parseFloat(newAvgCost.toFixed(4)) });
+        await Stock.update(stock.id, { shares: parseFloat(newShares.toFixed(4)), avg_cost: parseFloat(newAvgCost.toFixed(4)) });
+        toast({ title: `${stock.symbol} bought — ${cur} $${txValue.toFixed(2)} deducted from ${acct} cash` });
       } else if (data.type === "sell") {
-        // Add cash from sale
+        // Add cash from sale — creates cash position if needed
         await adjustCash(acct, cur, txValue);
-        const newShares = stock.shares - data.shares;
+        const newShares = (stock.shares || 0) - data.shares;
         if (newShares <= 0.0001) {
-          // Position closed — remove stock
           await Stock.delete(stock.id);
-          toast({ title: `Position closed — ${stock.symbol} removed from holdings` });
+          toast({ title: `${stock.symbol} sold — position closed, ${cur} $${txValue.toFixed(2)} added to ${acct} cash` });
         } else {
           await Stock.update(stock.id, { shares: parseFloat(newShares.toFixed(4)) });
+          toast({ title: `${stock.symbol} sold — ${cur} $${txValue.toFixed(2)} added to ${acct} cash` });
         }
       }
+    } else {
+      toast({ title: "Transaction added" });
     }
-    toast({ title: "Transaction added" });
     await loadAll();
   };
   const handleDeleteTransaction = async (id) => { await Transaction.delete(id); await loadAll(); };
@@ -1117,21 +1224,32 @@ function DashboardInner() {
   };
   const handleAddDividend = async (data) => {
     const stock = data.stock_id ? stocks.find(s => s.id === data.stock_id) : null;
-    // Use stock's native currency — never convert at entry time
-    const cur = data.currency || stock?.currency || "USD";
-    await Dividend.create({ ...data, currency: cur });
-    const acct = data.account_type || stock?.account_type || "Unassigned";
-    if (data.amount > 0) {
-      await adjustCash(acct, cur, parseFloat(data.amount));
+    const cur   = data.currency || stock?.currency || "CAD";
+    const acct  = data.account_type || stock?.account_type || "Unassigned";
+    const amt   = parseFloat(data.amount) || 0;
+    await Dividend.create({ ...data, currency: cur, account_type: acct });
+    if (amt > 0) {
+      // Add dividend amount to the account's cash balance in native currency
+      await adjustCash(acct, cur, amt);
+      const label = data.symbol || stock?.symbol || "Cash";
+      toast({ title: `${label} dividend — ${cur} $${amt.toFixed(2)} added to ${acct} cash` });
     }
-    const label = data.symbol || stock?.symbol || "dividend";
-    toast({ title: `${label} dividend recorded (${cur} $${parseFloat(data.amount).toFixed(2)})` });
     await loadAll();
   };
   const handleDeleteDividend = async (id) => { await Dividend.delete(id); await loadAll(); };
   const handleEditDividend = async (id, data) => { await Dividend.update(id, data); await loadAll(); };
 
   const grouped = groupByAccount(stocks);
+  const filteredGrouped = holdingSearch.trim()
+    ? Object.fromEntries(Object.entries(grouped).map(([acct, acctStocks]) => [
+        acct,
+        acctStocks.filter(s =>
+          s.symbol?.toLowerCase().includes(holdingSearch.toLowerCase()) ||
+          s.name?.toLowerCase().includes(holdingSearch.toLowerCase()) ||
+          s.sector?.toLowerCase().includes(holdingSearch.toLowerCase())
+        )
+      ]).filter(([, acctStocks]) => acctStocks.length > 0))
+    : grouped;
 
   // Build cash lookup: { accountName: { USD: 0, CAD: 0 } }
   const cashByAccount = {};
@@ -1159,6 +1277,7 @@ function DashboardInner() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {refreshing && <span className="text-xs text-gray-400 flex items-center gap-1"><RefreshCw className="h-3 w-3 animate-spin" /> Updating prices…</span>}
+            {!refreshing && rate && <span className="text-xs text-gray-400">US$1 = C${rate.toFixed(4)}</span>}
             <Button variant="outline" size="sm" onClick={() => setShowAddTx(true)} className="gap-1.5 bg-white">
               <Receipt className="h-3.5 w-3.5" /> Add Transaction
             </Button>
@@ -1187,33 +1306,35 @@ function DashboardInner() {
       </div>
 
       <div className="max-w-screen-xl mx-auto px-4 py-4">
-        <PortfolioPerformanceChart stocks={stocks} prices={prices} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />
+        <Widget id="perf_chart" tabId="main" title="Portfolio Performance" defaultSize="full">
+          <PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />
+        </Widget>
 
-        {/* Stats cards */}
+        {/* Stats cards — each individually resizable/removable */}
         <div className="mb-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="flex flex-wrap gap-3">
             {[
-              { label: "Portfolio Value", value: fmt(totalValue, globalCurrency), sub: <span className={cn("text-xs font-semibold", totalGainPct >= 0 ? "text-green-600" : "text-red-500")}>{totalGainPct >= 0 ? "+" : ""}{totalGainPct.toFixed(2)}%</span>, icon: <Wallet className="h-5 w-5" /> },
-              { label: "Total Gain/Loss", value: <span className={totalGain >= 0 ? "text-green-600" : "text-red-500"}>{totalGain >= 0 ? "+" : ""}{fmt(totalGain, globalCurrency)}</span>, sub: null, icon: <TrendingUp className="h-5 w-5" /> },
-              { label: `Dividends Received ${new Date().getFullYear()}`, value: fmt(totalDividendsReceived, globalCurrency), sub: `All time: ${fmt(globalCurrency==="CAD"?totalDividendsCAD:totalDividendsUSD, globalCurrency)}`, icon: <Coins className="h-5 w-5" /> },
-              { label: "Est. Annual Dividends", value: fmt(estAnnualDividends, globalCurrency), sub: avgYield > 0 ? `${avgYield.toFixed(2)}% avg yield` : null, icon: <TrendingUp className="h-5 w-5" /> },
-            ].map((s, i) => (
-              <Card key={i} className="bg-white">
-                <CardContent className="p-4 flex items-start justify-between">
+              { id:"card_value",   label: "Portfolio Value",   value: fmt(totalValue, globalCurrency), sub: <span className={cn("text-xs font-semibold", totalGainPct >= 0 ? "text-green-600" : "text-red-500")}>{totalGainPct >= 0 ? "+" : ""}{totalGainPct.toFixed(2)}%</span>, icon: <Wallet className="h-5 w-5" /> },
+              { id:"card_gain",    label: "Total Gain/Loss",   value: <span className={totalGain >= 0 ? "text-green-600" : "text-red-500"}>{totalGain >= 0 ? "+" : ""}{fmt(totalGain, globalCurrency)}</span>, sub: null, icon: <TrendingUp className="h-5 w-5" /> },
+              { id:"card_div",     label: `Dividends Received ${new Date().getFullYear()}`, value: fmt(totalDividendsReceived, globalCurrency), sub: `All time: ${fmt((globalCurrency==="CAD"?totalDividendsCAD:totalDividendsUSD) + historicalDivTotal, globalCurrency)}`, icon: <Coins className="h-5 w-5" /> },
+              { id:"card_est",     label: "Est. Annual Dividends", value: fmt(estAnnualDividends, globalCurrency), sub: avgYield > 0 ? `${avgYield.toFixed(2)}% avg yield` : null, icon: <TrendingUp className="h-5 w-5" /> },
+            ].map(s => (
+              <Widget key={s.id} id={s.id} tabId="main" title={s.label} defaultSize="third">
+                <div className="p-4 flex items-start justify-between">
                   <div>
                     <div className="text-xs text-gray-400">{s.label}</div>
                     <div className="text-xl font-bold text-gray-900 mt-0.5">{s.value}</div>
-                    {s.sub && <div className="mt-0.5">{s.sub}</div>}
+                    {s.sub && <div className="mt-0.5 text-xs text-gray-500">{s.sub}</div>}
                   </div>
                   <div className="text-gray-300 mt-1">{s.icon}</div>
-                </CardContent>
-              </Card>
+                </div>
+              </Widget>
             ))}
           </div>
 
           {/* Per-account dividend breakdown — one card per account */}
           {Object.keys(thisYearByAccount).length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div className="flex flex-wrap gap-3 mt-3">
               {Object.entries(thisYearByAccount)
                 .sort((a,b) => a[0].localeCompare(b[0]))
                 .map(([acct, amts]) => {
@@ -1221,8 +1342,8 @@ function DashboardInner() {
                     ? amts.CAD + amts.USD * USD_CAD
                     : amts.CAD / USD_CAD + amts.USD
                   return (
-                    <Card key={acct} className="bg-white">
-                      <CardContent className="p-4">
+                    <Widget key={acct} id={`acct_${acct}`} tabId="main" title={`${acct} ${thisYear}`} defaultSize="third">
+                      <div className="p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-bold text-gray-700">{acct}</span>
@@ -1261,8 +1382,8 @@ function DashboardInner() {
                             </div>
                           )}
                         </div>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </Widget>
                   )
                 })}
             </div>
@@ -1274,18 +1395,23 @@ function DashboardInner() {
           <div className="flex-1 min-w-0">
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-2 pt-2">
-                <DraggableTabBar
-                  tabOrder={tabOrder}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                  onReorder={handleReorderTabs}
-                />
+                <div className="flex gap-1 overflow-x-auto pb-1 flex-wrap">
+                  {tabOrder.map(tab => (
+                    <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                      className={cn("px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap transition-colors",
+                        activeTab === tab.id
+                          ? "bg-gray-900 text-white"
+                          : "text-gray-500 hover:text-gray-700 hover:bg-gray-100")}>
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="p-3">
 
                 {/* HOLDINGS */}
                 {activeTab === "holdings" && (
-                  <WidgetGrid tabId="holdings" widgets={[
+                  <WidgetGrid tabId="holdings" defaultWidgets={[
                     { id:"stocks", title:"Your Stocks", defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="holdings" defaultSize={w.defaultSize}>
@@ -1294,6 +1420,22 @@ function DashboardInner() {
                           <CardHeader className="pb-2 flex flex-row items-center justify-between">
                             <CardTitle className="text-sm text-gray-700">Your Stocks</CardTitle>
                             <div className="flex items-center gap-2">
+                              {/* Search bar */}
+                              <div className="relative">
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                                <input
+                                  type="text" value={holdingSearch}
+                                  onChange={e => setHoldingSearch(e.target.value)}
+                                  placeholder="Search..."
+                                  className="pl-8 pr-7 py-1 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 w-36"
+                                />
+                                {holdingSearch && (
+                                  <button onClick={() => setHoldingSearch("")}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
                               <span className="text-xs text-gray-400">{stocks.length} holdings</span>
                               <button onClick={() => { setCashModalAccount(""); setCashModalCurrency("CAD"); setShowCashModal(true); }}
                                 className="flex items-center gap-1 text-xs text-blue-600 border border-blue-200 rounded px-2 py-0.5 hover:bg-blue-50 transition-colors">
@@ -1305,8 +1447,8 @@ function DashboardInner() {
                             {stocks.length === 0 && allAccountNames.length === 0 ? (
                               <div className="text-center py-16 text-gray-400 text-sm">No stocks yet. Click <strong className="text-gray-600">Add Stock</strong> to get started.</div>
                             ) : (
-                              allAccountNames.map(account => {
-                                const acctStocks = grouped[account] || [];
+                              (holdingSearch ? Object.keys(filteredGrouped) : allAccountNames).map(account => {
+                                const acctStocks = filteredGrouped[account] || [];
                                 const cash = cashByAccount[account] || {};
                                 const avNative = acctStocks.reduce((s, st) => { const p = prices[st.symbol]?.price ?? st.avg_cost; return s + p * st.shares; }, 0);
                                 const cashUSD = cash["USD"] || 0;
@@ -1315,9 +1457,9 @@ function DashboardInner() {
                                 const ag = avNative - ac;
                                 const agp = ac > 0 ? (ag / ac) * 100 : 0;
                                 const isOpen = expandedAccount[account] !== false;
-                                const acctCurrency = accountCurrency[account] || "native";
+                                const acctCurrency = accountCurrency[account] || "CAD";
                                 const avUSD = acctStocks.reduce((s, st) => { const p = prices[st.symbol]?.price ?? st.avg_cost; const val = p * st.shares; return s + (st.currency === "CAD" ? val * 0.73 : val); }, 0);
-                                const avCAD = acctStocks.reduce((s, st) => { const p = prices[st.symbol]?.price ?? st.avg_cost; const val = p * st.shares; return s + (st.currency === "USD" ? val * 1.37 : val); }, 0);
+                                const avCAD = acctStocks.reduce((s, st) => { const p = prices[st.symbol]?.price ?? st.avg_cost; const val = p * st.shares; return s + (st.currency === "USD" ? val * rate : val); }, 0);
                                 const displayValue = acctCurrency === "USD" ? avUSD : acctCurrency === "CAD" ? avCAD : avNative;
                                 const displayCur = acctCurrency === "native" ? (acctStocks[0]?.currency || "USD") : acctCurrency;
                                 const hasCash = cashUSD > 0 || cashCAD > 0;
@@ -1346,6 +1488,47 @@ function DashboardInner() {
                                         <button onClick={() => toggleAccount(account)}>{isOpen ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}</button>
                                       </div>
                                     </div>
+                                    {/* Per-account CAD / USD / Grand total breakdown */}
+                                    {(() => {
+                                      const cadStocks = acctStocks.filter(s => s.currency === "CAD")
+                                      const usdStocks = acctStocks.filter(s => s.currency === "USD")
+                                      const cadTotal  = cadStocks.reduce((s,st) => s + (prices[st.symbol]?.price ?? st.avg_cost) * st.shares, 0)
+                                      const usdTotal  = usdStocks.reduce((s,st) => s + (prices[st.symbol]?.price ?? st.avg_cost) * st.shares, 0)
+                                      const grandCAD  = cadTotal + usdTotal * rate
+                                      if (cadStocks.length === 0 && usdStocks.length === 0) return null
+                                      return (
+                                        <div className="flex items-center gap-4 px-4 py-1.5 bg-gray-50 border-t border-gray-100 text-xs flex-wrap">
+                                          {cadStocks.length > 0 && (
+                                            <span className="flex items-center gap-1 text-gray-600">
+                                              <span className="text-red-400">🍁</span>
+                                              <span className="text-gray-400">CAD stocks:</span>
+                                              <span className="font-semibold text-gray-700">C${cadTotal.toLocaleString("en-CA",{maximumFractionDigits:0})}</span>
+                                            </span>
+                                          )}
+                                          {usdStocks.length > 0 && (
+                                            <span className="flex items-center gap-1 text-gray-600">
+                                              <span className="text-blue-400">🇺🇸</span>
+                                              <span className="text-gray-400">USD stocks:</span>
+                                              <span className="font-semibold text-gray-700">US${usdTotal.toLocaleString("en-CA",{maximumFractionDigits:0})}</span>
+                                            </span>
+                                          )}
+                                          {cadStocks.length > 0 && usdStocks.length > 0 && (
+                                            <span className="flex items-center gap-1 text-gray-600 border-l border-gray-200 pl-3">
+                                              <span className="text-gray-400">Total:</span>
+                                              <span className="font-bold text-gray-800">C${grandCAD.toLocaleString("en-CA",{maximumFractionDigits:0})}</span>
+                                            </span>
+                                          )}
+                                          {(cashCAD > 0 || cashUSD > 0) && (
+                                            <span className="flex items-center gap-1 text-gray-600 border-l border-gray-200 pl-3">
+                                              <span className="text-amber-500">💰</span>
+                                              <span className="text-gray-400">Cash:</span>
+                                              {cashCAD > 0 && <span className="font-semibold text-gray-700">C${cashCAD.toLocaleString("en-CA",{maximumFractionDigits:2})}</span>}
+                                              {cashUSD > 0 && <span className="font-semibold text-gray-700">US${cashUSD.toLocaleString("en-CA",{maximumFractionDigits:2})}</span>}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )
+                                    })()}
                                     {isOpen && (
                                       <div>
                                         {acctStocks.map(stock => {
@@ -1470,12 +1653,25 @@ function DashboardInner() {
                   )} />
                 )}
 
+                {/* POSITIONS SUMMARY */}
+                {activeTab === "positions" && (
+                  <div className="p-4">
+                    <PositionSummary
+                      stocks={stocks}
+                      prices={prices}
+                      dividends={dividends}
+                      globalCurrency={globalCurrency}
+                      totalDividendsReceived={totalDividendsReceived}
+                    />
+                  </div>
+                )}
+
                 {/* WATCHLIST */}
                 {activeTab === "watchlist" && (
-                  <WidgetGrid tabId="watchlist" widgets={[{ id:"watchlist", title:"Watchlist", defaultSize:"full" }]}
+                  <WidgetGrid tabId="watchlist" defaultWidgets={[{ id:"watchlist", title:"Watchlist", defaultSize:"full" }]}
                     renderWidget={w => (
                       <Widget key={w.id} id={w.id} title={w.title} tabId="watchlist" defaultSize="full">
-                        <Watchlist />
+                        <Watchlist stocks={stocks} prices={prices} dividends={dividends} globalCurrency={globalCurrency} />
                       </Widget>
                     )} />
                 )}
@@ -1487,18 +1683,16 @@ function DashboardInner() {
 
                 {/* DIVIDENDS */}
                 {activeTab === "dividends" && (
-                  <WidgetGrid tabId="dividends" widgets={[
+                  <WidgetGrid tabId="dividends" defaultWidgets={[
                     { id:"monthly",    title:"Monthly Dividend Income",       defaultSize:"full" },
                     { id:"actual_vs",  title:"Actual vs Predicted Dividends", defaultSize:"full" },
                     { id:"charts",     title:"Dividend Charts",               defaultSize:"half" },
-                    { id:"calendar",   title:"Dividend Calendar",             defaultSize:"half" },
                     { id:"list",       title:"Dividend History",              defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="dividends" defaultSize={w.defaultSize}>
-                      {w.id === "monthly"   && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
+                      {w.id === "monthly"   && <MonthlyDividendChart dividends={dividends} stocks={stocks} totalDividendsReceived={totalDividendsReceived} />}
                       {w.id === "actual_vs" && <DividendActualVsPredicted dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
                       {w.id === "charts"    && <DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
-                      {w.id === "calendar"  && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
                       {w.id === "list"      && <DividendList dividends={dividends} stocks={stocks} onDelete={handleDeleteDividend} onEdit={handleEditDividend} globalCurrency={globalCurrency} />}
                     </Widget>
                   )} />
@@ -1510,70 +1704,57 @@ function DashboardInner() {
                 )}
 
                 {/* ANALYTICS — all charts from every tab */}
-                {activeTab === "analytics" && (
-                  <WidgetGrid tabId="analytics" widgets={[
-                    { id:"perf",       title:"Portfolio Performance",         defaultSize:"full" },
-                    { id:"yoy",        title:"Year over Year Performance",    defaultSize:"full" },
-                    { id:"sector",     title:"Sector Allocation",             defaultSize:"half" },
-                    { id:"monthly",    title:"Monthly Dividend Income",       defaultSize:"half" },
-                    { id:"actual_vs",  title:"Actual vs Predicted Dividends", defaultSize:"full" },
-                    { id:"div_charts", title:"Dividend Charts",               defaultSize:"half" },
-                    { id:"calendar",   title:"Dividend Calendar",             defaultSize:"half" },
-                    { id:"divcalview", title:"Dividend Calendar View",        defaultSize:"full" },
-                    { id:"accsummary", title:"Account Summary",               defaultSize:"full" },
-                    { id:"projection", title:"Projection at 60",              defaultSize:"full" },
-                    { id:"closed",     title:"Closed Positions",              defaultSize:"full" },
-                    { id:"backup",     title:"Data Backup",                   defaultSize:"full" },
-                  ]} renderWidget={w => {
+                {activeTab === "analytics" && (() => {
                     const sectors = {};
                     stocks.forEach(s => { const sec = s.sector || "Other"; const val = (prices[s.symbol]?.price ?? s.avg_cost) * s.shares; sectors[sec] = (sectors[sec] || 0) + val; });
                     const secData  = Object.entries(sectors).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
                     const secTotal = secData.reduce((s,d) => s + d.value, 0);
                     const colors   = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#ec4899","#6b7280"];
                     return (
-                      <Widget key={w.id} id={w.id} title={w.title} tabId="analytics" defaultSize={w.defaultSize}>
-                        {w.id === "perf"       && <PortfolioPerformanceChart stocks={stocks} prices={prices} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />}
-                        {w.id === "sector" && (() => {
-                      return (
-                        <Card className="border-0 shadow-none">
-                          <CardContent className="pt-2">
-                            <ResponsiveContainer width="100%" height={260}>
-                              <PieChart>
-                                <Pie data={secData} cx="50%" cy="50%" outerRadius={90} dataKey="value" nameKey="name"
-                                  label={({name, percent}) => `${name} ${(percent*100).toFixed(1)}%`} labelLine={false}>
-                                  {secData.map((d,i) => <Cell key={i} fill={colors[i%colors.length]}/>)}
-                                </Pie>
-                                <Tooltip formatter={(v,name) => [fmt(v, globalCurrency), name]}/>
-                              </PieChart>
-                            </ResponsiveContainer>
-                            <div className="space-y-1.5 mt-2">
-                              {secData.map((d,i) => (
-                                <div key={d.name} className="flex items-center gap-2">
-                                  <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{background:colors[i%colors.length]}}/>
-                                  <span className="text-xs text-gray-700 flex-1">{d.name}</span>
-                                  <span className="text-xs font-semibold text-gray-700">{fmt(d.value, globalCurrency)}</span>
-                                  <span className="text-xs text-gray-400 w-10 text-right">{((d.value/secTotal)*100).toFixed(1)}%</span>
+                    <div className="space-y-4">
+                      <WidgetErrorBoundary title="Portfolio Performance"><PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} /></WidgetErrorBoundary>
+                      <div className="flex flex-wrap gap-4">
+                        <div className="flex-1 min-w-[300px]">
+                          <WidgetErrorBoundary title="Sector Allocation">
+                            <Card className="border shadow-sm">
+                              <CardHeader className="pb-1"><CardTitle className="text-sm">Sector Allocation</CardTitle></CardHeader>
+                              <CardContent className="pt-2">
+                                <ResponsiveContainer width="100%" height={260}>
+                                  <PieChart>
+                                    <Pie data={secData} cx="50%" cy="50%" outerRadius={90} dataKey="value" nameKey="name"
+                                      label={({name, percent}) => `${name} ${(percent*100).toFixed(1)}%`} labelLine={false}>
+                                      {secData.map((d,i) => <Cell key={i} fill={colors[i%colors.length]}/>)}
+                                    </Pie>
+                                    <Tooltip formatter={(v,name) => [fmt(v, globalCurrency), name]}/>
+                                  </PieChart>
+                                </ResponsiveContainer>
+                                <div className="space-y-1.5 mt-2">
+                                  {secData.map((d,i) => (
+                                    <div key={d.name} className="flex items-center gap-2">
+                                      <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{background:colors[i%colors.length]}}/>
+                                      <span className="text-xs text-gray-700 flex-1">{d.name}</span>
+                                      <span className="text-xs font-semibold text-gray-700">{fmt(d.value, globalCurrency)}</span>
+                                      <span className="text-xs text-gray-400 w-10 text-right">{((d.value/secTotal)*100).toFixed(1)}%</span>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )
-                    })()}
-                        {w.id === "monthly"    && <MonthlyDividendChart dividends={dividends} stocks={stocks} />}
-                        {w.id === "actual_vs"  && <DividendActualVsPredicted dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
-                        {w.id === "div_charts" && <DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
-                        {w.id === "calendar"   && <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />}
-                        {w.id === "accsummary" && <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />}
-                        {w.id === "projection" && <ProjectionAt60 stocks={stocks} prices={prices} />}
-                        {w.id === "closed"     && <ClosedPositions transactions={transactions} dividends={dividends} stocks={stocks} />}
-                        {w.id === "backup"     && <DataBackup onRestored={loadAll} />}
-                        {w.id === "yoy"        && <YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />}
-                        {w.id === "divcalview" && <DividendCalendarView dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />}
-                      </Widget>
-                    );
-                  }} />
-                )}
+                              </CardContent>
+                            </Card>
+                          </WidgetErrorBoundary>
+                        </div>
+                        <div className="flex-1 min-w-[300px]">
+                          <WidgetErrorBoundary title="Monthly Dividend Income"><MonthlyDividendChart dividends={dividends} stocks={stocks} totalDividendsReceived={totalDividendsReceived} /></WidgetErrorBoundary>
+                        </div>
+                      </div>
+                      <WidgetErrorBoundary title="Actual vs Predicted"><DividendActualVsPredicted dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} /></WidgetErrorBoundary>
+                      <div className="flex flex-wrap gap-4">
+                        <div className="flex-1 min-w-[300px]"><WidgetErrorBoundary title="Dividend Charts"><DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} /></WidgetErrorBoundary></div>
+                      </div>
+                      <WidgetErrorBoundary title="Year over Year"><YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
+                      <WidgetErrorBoundary title="Account Summary"><AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} /></WidgetErrorBoundary>
+                    </div>
+                  )})()
+                }
 
                 {/* ACCOUNT SUMMARY */}
                 {activeTab === "summary" && (
@@ -1582,12 +1763,12 @@ function DashboardInner() {
 
                 {/* PROJECTION AT 60 */}
                 {activeTab === "projection" && (
-                  <ProjectionAt60 stocks={stocks} prices={prices} />
+                  <ProjectionAt60 stocks={stocks} prices={prices} totalValue={totalValue} />
                 )}
 
                 {/* DIVIDEND CALENDAR */}
                 {activeTab === "divcalendar" && (
-                  <WidgetGrid tabId="divcalendar" widgets={[
+                  <WidgetGrid tabId="divcalendar" defaultWidgets={[
                     { id:"calview", title:"Dividend Calendar", defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="divcalendar" defaultSize="full">
@@ -1598,17 +1779,45 @@ function DashboardInner() {
 
                 {/* YEAR OVER YEAR */}
                 {activeTab === "yoy" && (
-                  <YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />
+                  <YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} />
                 )}
 
                 {/* DIVIDEND HISTORY */}
                 {activeTab === "histdiv" && (
-                  <HistoricalDividends dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />
+                  <div className="space-y-4">
+                    {/* Account breakdown cards — same as main page */}
+                    {Object.keys(thisYearByAccount).length > 0 && (
+                      <div className="flex flex-wrap gap-3">
+                        {Object.entries(thisYearByAccount)
+                          .sort((a,b)=>a[0].localeCompare(b[0]))
+                          .map(([acct, amts]) => {
+                            const acctTotal = amts.CAD + amts.USD * USD_CAD
+                            return (
+                              <Widget key={acct} id={`histdiv_acct_${acct}`} tabId="histdiv" title={`${acct} ${thisYear}`} defaultSize="third">
+                                <div className="p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-gray-700">{acct} {thisYear}</span>
+                                    <span className="text-sm font-bold text-green-600">{fmt(acctTotal, globalCurrency)}</span>
+                                  </div>
+                                  <div className="space-y-1 text-xs">
+                                    {amts.CAD > 0 && <div className="flex justify-between"><span className="text-red-500">🍁 CAD stocks</span><span className="font-medium">C${amts.CAD.toFixed(2)}</span></div>}
+                                    {amts.USD > 0 && <div className="flex justify-between"><span className="text-blue-500">🇺🇸 USD stocks</span><span className="font-medium">US${amts.USD.toFixed(2)}</span></div>}
+                                    {amts.cashCAD > 0 && <div className="flex justify-between text-amber-600"><span>💰 Cash CAD</span><span>C${amts.cashCAD.toFixed(2)}</span></div>}
+                                    {amts.cashUSD > 0 && <div className="flex justify-between text-amber-600"><span>💰 Cash USD</span><span>US${amts.cashUSD.toFixed(2)}</span></div>}
+                                  </div>
+                                </div>
+                              </Widget>
+                            )
+                          })}
+                      </div>
+                    )}
+                    <HistoricalDividends dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} />
+                  </div>
                 )}
 
                 {/* SETTINGS */}
                 {activeTab === "settings" && (
-                  <WidgetGrid tabId="settings" widgets={[
+                  <WidgetGrid tabId="settings" defaultWidgets={[
                     { id:"fx",     title:"Exchange Rate",             defaultSize:"half" },
                     { id:"tfsa",   title:"TFSA Contribution Room",    defaultSize:"half" },
                     { id:"import", title:"Import Stocks",             defaultSize:"half" },
@@ -1618,7 +1827,7 @@ function DashboardInner() {
                       {w.id === "fx" && <ExchangeRateWidget />}
                       {w.id === "tfsa"   && <TFSATracker transactions={transactions} stocks={stocks} />}
                       {w.id === "import" && <ImportStocks onImported={() => loadAll()} />}
-                      {w.id === "backup" && <DataBackup onRestored={loadAll} />}
+                      {w.id === "backup" && <DataBackup onRestored={loadAll} stocks={stocks} prices={prices} />}
                     </Widget>
                   )} />
                 )}
@@ -1630,7 +1839,6 @@ function DashboardInner() {
           {/* Sidebar */}
           <div className="w-72 flex-shrink-0 space-y-3 hidden lg:block">
             <PriceAlertsPanel />
-            <DividendCalendar stocks={stocks} dividends={dividends} globalCurrency={globalCurrency} />
             <BuyOpportunitiesPanel />
             <AISentimentPanel />
             <AIAssistantPanel />

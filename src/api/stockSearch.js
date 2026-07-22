@@ -25,6 +25,19 @@ async function proxyFetch(url) {
   return null
 }
 
+
+// Fetch live USD/CAD exchange rate from Yahoo Finance
+export async function fetchUSDCADRate() {
+  try {
+    const data = await proxyFetch(
+      "https://query2.finance.yahoo.com/v8/finance/chart/USDCAD=X?interval=1d&range=1d"
+    )
+    const rate = data?.chart?.result?.[0]?.meta?.regularMarketPrice
+    if (rate && rate > 1.0 && rate < 2.0) return parseFloat(rate.toFixed(4))
+  } catch {}
+  return 1.40  // fallback if fetch fails
+}
+
 export async function searchTickers(query) {
   if (!query || query.trim().length < 1) return []
   const data = await proxyFetch(

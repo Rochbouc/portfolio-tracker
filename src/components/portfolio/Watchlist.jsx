@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Eye, Trash2, RefreshCw, TrendingUp, TrendingDown, Bell, BellOff, X, BellRing } from "lucide-react"
@@ -8,7 +9,7 @@ import { StockLogoButton } from "@/components/ui/StockPopup"
 import { cn } from "@/lib/utils"
 
 const STORAGE_KEY = "watchlist_items"
-const ALERTS_KEY  = "watchlist_alerts"
+const ALERTS_KEY  = "price_alerts"   // same key as sidebar PriceAlertsPanel
 const FIRED_KEY   = "watchlist_alerts_fired"   // track which alerts have already notified
 
 function load(key)    { try { return JSON.parse(localStorage.getItem(key) || "[]") } catch { return [] } }
@@ -55,7 +56,146 @@ function fireBrowserNotif(title, body) {
   } catch {}
 }
 
-export default function Watchlist() {
+export default function Watchlist({ stocks = [], prices = {}, dividends = [], globalCurrency = "CAD" }) {
+  const USD_CAD = getRate()
+  const [topUS,        setTopUS]        = useState([])
+  const [topCA,        setTopCA]        = useState([])
+  const [loadingMkt,   setLoadingMkt]   = useState(false)
+  const [mktError,     setMktError]     = useState("")
+  const [lastFetched,  setLastFetched]  = useState(null)
+
+  // ── Detect fast movers in your portfolio (US + CA separately) ───
+  const usMovers = useMemo(() => stocks
+    .filter(s => s.shares > 1 && s.avg_cost > 1 && s.currency === "USD")
+    .map(s => {
+      const q = prices[s.symbol]; const live = q?.price ?? s.avg_cost; const prev = q?.previousClose ?? live
+      const chg = prev > 0 ? (live - prev) / prev * 100 : 0
+      return { symbol: s.symbol, account: s.account_type, live, chg, cur: "USD" }
+    })
+    .filter(s => Math.abs(s.chg) >= 3)
+    .sort((a,b) => Math.abs(b.chg) - Math.abs(a.chg))
+    .slice(0, 10)
+  , [stocks, prices])
+
+  const caMovers = useMemo(() => stocks
+    .filter(s => s.shares > 1 && s.avg_cost > 1 && s.currency === "CAD")
+    .map(s => {
+      const q = prices[s.symbol]; const live = q?.price ?? s.avg_cost; const prev = q?.previousClose ?? live
+      const chg = prev > 0 ? (live - prev) / prev * 100 : 0
+      return { symbol: s.symbol, account: s.account_type, live, chg, cur: "CAD" }
+    })
+    .filter(s => Math.abs(s.chg) >= 3)
+    .sort((a,b) => Math.abs(b.chg) - Math.abs(a.chg))
+    .slice(0, 10)
+  , [stocks, prices])
+
+  // ── Fetch top market performers — US (Yahoo Finance movers) + CA ─
+  async function fetchMarketMovers() {
+    setLoadingMkt(true); setMktError("")
+    try {
+      const groqKey = localStorage.getItem("groq_api_key")
+      if (!groqKey) { setMktError("Add your Groq API key in Settings to use this feature"); setLoadingMkt(false); return }
+
+      const today = new Date().toLocaleDateString("en-CA")
+
+      // Ask Groq for US top 10 and CA top 10 separately
+      const prompt = `Today is ${today}. List the top 10 best performing stocks on US markets (NYSE/NASDAQ) AND top 10 best performing stocks on Canadian markets (TSX) over the past month. Base this on your training data for recent market performance. For each stock provide: symbol (use .TO suffix for Canadian), company name, approximate 1-month return %, market (US or CA), and one sentence reason. Respond ONLY with valid JSON: {"us":[{"symbol":"NVDA","name":"NVIDIA Corp","return_pct":18.5,"reason":"Strong AI chip sales"}],"ca":[{"symbol":"CNQ.TO","name":"Canadian Natural Resources","return_pct":8.2,"reason":"Rising oil prices"}]}`
+
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          max_tokens: 1200,
+          messages: [{ role: "user", content: prompt }]
+        })
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error.message)
+      const text  = data.choices?.[0]?.message?.content || ""
+      const clean = text.replace(/```json|```/g,"").trim()
+      const parsed = JSON.parse(clean)
+      setTopUS(parsed.us || [])
+      setTopCA(parsed.ca || [])
+      setLastFetched(new Date().toLocaleTimeString())
+    } catch(e) {
+      setMktError(`Error: ${e.message || "Could not fetch market data. Try again."}`)
+    }
+    setLoadingMkt(false)
+  }
+
+
+  // ── Top/Worst Performers (last 6 months, including dividends received) ──
+  const performers = useMemo(() => {
+    const sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0,10)
+
+    return stocks
+      .filter(s => s.shares > 0 && s.avg_cost > 1)  // exclude free/spin-off stocks with near-zero cost
+      .map(s => {
+        const livePrice = prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost
+        const cur       = s.currency || "USD"
+        const toDisplay = (amt, c) => {
+          if (c === globalCurrency) return amt
+          return globalCurrency === "CAD" ? amt * USD_CAD : amt / USD_CAD
+        }
+
+        const costBasis = s.avg_cost * s.shares
+        const mktValue  = livePrice * s.shares
+
+        // Live dividends in last 6 months
+        const liveDivTotal = dividends
+          .filter(d => d.stock_id === s.id && d.date >= sixMonthsAgoStr)
+          .reduce((sum, d) => sum + toDisplay(d.amount||0, d.currency||cur), 0)
+
+        // Historical dividends (all years from Dividend History tab)
+        let histDivTotal = 0
+        try {
+          const hist = JSON.parse(localStorage.getItem("historical_dividends_per_stock_v2")||"{}")
+          const key = `${s.symbol}|${s.account_type}`
+          if (hist[key]) {
+            Object.values(hist[key]).forEach(amt => {
+              histDivTotal += toDisplay(parseFloat(amt)||0, cur)
+            })
+          }
+        } catch {}
+
+        const divTotal6m    = liveDivTotal
+        const divTotalAll   = liveDivTotal + histDivTotal
+
+        // Return (price only, no dividends)
+        const gainNoDiv    = toDisplay(mktValue - costBasis, cur)
+        const gainNoDivPct = costBasis > 0 ? gainNoDiv / toDisplay(costBasis, cur) * 100 : 0
+
+        // Return with all dividends
+        const gainWithDiv    = gainNoDiv + divTotalAll
+        const gainWithDivPct = costBasis > 0 ? gainWithDiv / toDisplay(costBasis, cur) * 100 : 0
+
+        return {
+          symbol:      s.symbol,
+          name:        s.name || s.symbol,
+          account:     s.account_type || "",
+          cur,
+          mktValue:    toDisplay(mktValue, cur),
+          costBasis:   toDisplay(costBasis, cur),
+          divTotal:    divTotal6m,
+          divTotalAll,
+          gain:        gainNoDiv,
+          gainPct:     gainNoDivPct,
+          gainWithDiv,
+          gainWithDivPct,
+          stock: s,
+        }
+      })
+      .sort((a,b) => b.gainPct - a.gainPct)
+  }, [stocks, prices, dividends, globalCurrency])
+
+  const top10    = performers.slice(0, 10)
+  const worst10  = [...performers].reverse().slice(0, 10)
+
+  const fmtD = (n) => new Intl.NumberFormat("en-CA",{style:"currency",currency:globalCurrency,maximumFractionDigits:0}).format(n||0)
+
   const { toast } = useToast()
   const [items,    setItems]    = useState(() => load(STORAGE_KEY))
   const [alerts,   setAlerts]   = useState(() => load(ALERTS_KEY))
@@ -71,7 +211,12 @@ export default function Watchlist() {
   alertsRef.current = alerts
 
   function saveItems(list)  { save(STORAGE_KEY, list); setItems(list) }
-  function saveAlerts(list) { save(ALERTS_KEY,  list); setAlerts(list) }
+  function saveAlerts(list) {
+    localStorage.setItem(ALERTS_KEY, JSON.stringify(list))
+    setAlerts(list)
+    // Dispatch storage event so sidebar PriceAlertsPanel syncs immediately
+    window.dispatchEvent(new StorageEvent("storage", { key: ALERTS_KEY, newValue: JSON.stringify(list) }))
+  }
   function saveFired(obj)   { save(FIRED_KEY,   obj);  setFired(obj) }
 
   // ── Fetch prices + check alerts ─────────────────────────────────
@@ -191,7 +336,211 @@ export default function Watchlist() {
   const triggeredAlerts = alerts.filter(a => fired[a.id])
 
   return (
-    <Card className="bg-white">
+    <div className="space-y-4">
+
+      {/* Portfolio Fast Movers */}
+      {(usMovers.length > 0 || caMovers.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[{label:"🇺🇸 US Fast Movers — Today", movers:usMovers}, {label:"🍁 CA Fast Movers — Today", movers:caMovers}].map(({label,movers}) =>
+            movers.length === 0 ? null : (
+              <Card key={label} className="bg-white border-amber-200">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <span className="text-amber-500">⚡</span>{label}
+                    <span className="text-[10px] font-normal text-gray-400">(≥3% today)</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <table className="w-full text-xs">
+                    <thead className="bg-amber-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-gray-500">Stock</th>
+                        <th className="px-3 py-2 text-right text-gray-500">Price</th>
+                        <th className="px-3 py-2 text-right text-gray-500">Change</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {movers.map(s => (
+                        <tr key={s.symbol+s.account} className="border-t border-amber-50 hover:bg-amber-50/50">
+                          <td className="px-3 py-1.5">
+                            <div className="font-semibold text-gray-900">{s.symbol}</div>
+                            <div className="text-gray-400 text-[10px]">{s.account}</div>
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-gray-700">${s.live.toFixed(2)} {s.cur}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <span className={cn("font-bold", s.chg >= 0 ? "text-green-600" : "text-red-500")}>
+                              {s.chg >= 0 ? "▲" : "▼"} {Math.abs(s.chg).toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            )
+          )}
+        </div>
+      )}
+
+      {/* Market Top Performers */}
+      <Card className="bg-white">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <span className="text-purple-500">🌍</span>
+              Top Market Performers — Past Month
+              {lastFetched && <span className="text-[10px] font-normal text-gray-400">Updated {lastFetched}</span>}
+            </CardTitle>
+            <button onClick={fetchMarketMovers} disabled={loadingMkt}
+              className="flex items-center gap-1.5 text-xs text-purple-600 border border-purple-200 rounded px-2.5 py-1.5 hover:bg-purple-50 disabled:opacity-50">
+              {loadingMkt
+                ? <><div className="w-3 h-3 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin mr-1"/>Fetching…</>
+                : <>🔍 Fetch Latest</>}
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {mktError && <div className="px-4 py-3 text-xs text-red-600 bg-red-50 rounded">{mktError}</div>}
+          {topUS.length === 0 && topCA.length === 0 && !mktError && (
+            <div className="text-center py-6 text-gray-400 text-xs">
+              Click <strong>Fetch Latest</strong> to load top performers from US & Canadian markets
+            </div>
+          )}
+          {(topUS.length > 0 || topCA.length > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 divide-x divide-gray-100">
+              {[{label:"🇺🇸 Top 10 US", list:topUS}, {label:"🍁 Top 10 Canada", list:topCA}].map(({label,list}) => (
+                <div key={label}>
+                  <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-50">{label}</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-gray-400 font-normal">Stock</th>
+                        <th className="px-3 py-1.5 text-right text-gray-400 font-normal">1M</th>
+                        <th className="px-3 py-1.5 text-left text-gray-400 font-normal hidden lg:table-cell">Why</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map((s,i) => (
+                        <tr key={i} className="border-t border-gray-50 hover:bg-gray-50">
+                          <td className="px-3 py-1.5">
+                            <div className="font-semibold text-gray-900">{s.symbol}</div>
+                            <div className="text-gray-400 text-[10px]">{s.name}</div>
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <span className={cn("font-bold", (s.return_pct||0)>=0?"text-green-600":"text-red-500")}>
+                              {(s.return_pct||0)>=0?"+":""}{(s.return_pct||0).toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-400 text-[10px] hidden lg:table-cell max-w-[140px]" style={{whiteSpace:"normal"}}>{s.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      {stocks.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Top 10 */}
+          <Card className="bg-white">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-green-500"/>
+                Top 10 Performers — Last 6 Months
+                <span className="text-[10px] font-normal text-gray-400">(incl. dividends)</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-gray-500">Stock</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Mkt Value</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Dividends</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Return %</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Ret+Div %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top10.map((s,i) => (
+                    <tr key={s.symbol+s.account} className="border-t border-gray-50 hover:bg-gray-50">
+                      <td className="px-3 py-1.5">
+                        <div className="font-semibold text-gray-900">{s.symbol}</div>
+                        <div className="text-gray-400">{s.account}</div>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700">{fmtD(s.mktValue)}</td>
+                      <td className="px-3 py-1.5 text-right text-blue-600">{s.divTotalAll > 0 ? fmtD(s.divTotalAll) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className={cn("font-semibold text-xs", s.gainPct >= 0 ? "text-green-600" : "text-red-500")}>
+                          {s.gainPct >= 0 ? "+" : ""}{s.gainPct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className={cn("font-bold text-xs", s.gainWithDivPct >= 0 ? "text-green-700" : "text-red-600")}>
+                          {s.gainWithDivPct >= 0 ? "+" : ""}{s.gainWithDivPct.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+
+          {/* Worst 10 */}
+          <Card className="bg-white">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <TrendingDown className="h-4 w-4 text-red-500"/>
+                Worst 10 Performers — Last 6 Months
+                <span className="text-[10px] font-normal text-gray-400">(incl. dividends)</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-gray-500">Stock</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Mkt Value</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Dividends</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Return %</th>
+                    <th className="px-3 py-2 text-right text-gray-500">Ret+Div %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {worst10.map((s,i) => (
+                    <tr key={s.symbol+s.account} className="border-t border-gray-50 hover:bg-gray-50">
+                      <td className="px-3 py-1.5">
+                        <div className="font-semibold text-gray-900">{s.symbol}</div>
+                        <div className="text-gray-400">{s.account}</div>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700">{fmtD(s.mktValue)}</td>
+                      <td className="px-3 py-1.5 text-right text-blue-600">{s.divTotalAll > 0 ? fmtD(s.divTotalAll) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className={cn("font-semibold text-xs", s.gainPct >= 0 ? "text-green-600" : "text-red-500")}>
+                          {s.gainPct >= 0 ? "+" : ""}{s.gainPct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        <span className={cn("font-bold text-xs", s.gainWithDivPct >= 0 ? "text-green-700" : "text-red-600")}>
+                          {s.gainWithDivPct >= 0 ? "+" : ""}{s.gainWithDivPct.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Existing Watchlist */}
+      <Card className="bg-white">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="text-sm flex items-center gap-2">
@@ -401,5 +750,6 @@ export default function Watchlist() {
         )}
       </CardContent>
     </Card>
+    </div>
   )
 }

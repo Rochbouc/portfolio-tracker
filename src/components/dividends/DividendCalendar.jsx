@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Calendar, Loader2, RefreshCw } from "lucide-react"
 import { Stock } from "@/api/localData"
 import { getDividendDataBatch, getPaySchedule } from "@/api/dividendData"
 
 export default function DividendCalendar({ stocks = [], dividends = [], globalCurrency = "CAD" }) {
-  const USD_CAD = 1.37
+  const USD_CAD = getRate()
   const convertAmt = (amount, currency) => {
     if (globalCurrency === "CAD" && currency === "USD") return amount * USD_CAD
     if (globalCurrency === "USD" && currency === "CAD") return amount / USD_CAD
@@ -28,24 +29,27 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
       const fetched = needFetch.length > 0 ? await getDividendDataBatch(needFetch) : {}
 
       for (const [stockId, data] of Object.entries(fetched)) {
-        if (data.annualTotal > 0 || data.yieldPct > 0) {
+        if (data.annualRatePerShare > 0 || data.yieldPct > 0) {
           await Stock.update(stockId, {
-            annual_dividend: parseFloat(data.annualTotal.toFixed(4)),
-            dividend_yield:  parseFloat(data.yieldPct.toFixed(4)),
+            annual_dividend: parseFloat((data.annualRatePerShare || 0).toFixed(6)),
+            dividend_yield:  parseFloat((data.yieldPct || 0).toFixed(6)),
           }).catch(() => {})
         }
       }
 
       const result = stocks.map(stock => {
-        let annualTotal = parseFloat(stock.annual_dividend) || 0
-        let yieldPct    = parseFloat(stock.dividend_yield)  || 0
+        // Always use the stored annual_dividend (per-share × shares) first — it's been fixed/verified
+        const storedAnnual = (parseFloat(stock.annual_dividend) || 0) * (stock.shares || 0)
+        let annualTotal = storedAnnual
+        let yieldPct    = parseFloat(stock.dividend_yield) || 0
         let frequency   = 4
 
         const fd = fetched[stock.id]
         if (fd) {
-          annualTotal = fd.annualTotal || annualTotal
-          yieldPct    = fd.yieldPct    || yieldPct
-          frequency   = fd.frequency   || 4
+          // Only use Yahoo data if we have no stored rate
+          if (!annualTotal && fd.annualTotal > 0) annualTotal = fd.annualTotal
+          if (!yieldPct    && fd.yieldPct    > 0) yieldPct    = fd.yieldPct
+          frequency = fd.frequency || 4
         }
 
         // ALWAYS get payMonths/payDay from hardcoded table — never null because of cache
@@ -112,7 +116,7 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
     const addToProjected = (date, amount) => {
       const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`
       if (!projected[key]) projected[key] = []
-      projected[key].push({ symbol: stock.symbol, amount, currency: stock.currency || "USD" })
+      projected[key].push({ symbol: stock.symbol, amount, currency: stock.currency || "CAD" })
     }
 
     if (isWeekly) {
@@ -173,7 +177,7 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
   })
 
   const sortedKeys = Object.keys(projected).sort()
-  const total12m   = Object.values(projected).flat().reduce((s, p) => s + convertAmt(p.amount, p.currency||"USD"), 0)
+  const total12m = Object.values(projected).flat().reduce((s, p) => s + convertAmt(p.amount, p.currency||"CAD"), 0)
   const divStocks  = enriched.filter(s => s._annualTotal > 0)
 
   const fmtAmt = n => (globalCurrency==="CAD"?"C$":"US$") + (n || 0).toFixed(2)
@@ -222,7 +226,7 @@ export default function DividendCalendar({ stocks = [], dividends = [], globalCu
             <div className="divide-y">
               {sortedKeys.map(key => {
                 const payments   = projected[key]
-                const monthTotal = payments.reduce((s, p) => s + convertAmt(p.amount, p.currency||"USD"), 0)
+                const monthTotal = payments.reduce((s, p) => s + convertAmt(p.amount, p.currency||"CAD"), 0)
                 const symbols    = [...new Set(payments.map(p => p.symbol))].join(", ")
                 return (
                   <div key={key} className="px-4 py-2.5">

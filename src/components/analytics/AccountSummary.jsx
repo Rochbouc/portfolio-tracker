@@ -1,11 +1,11 @@
 import { useState, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { TrendingUp, TrendingDown, DollarSign, PiggyBank } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Exchange rate (approximate)
-const USD_CAD = 1.37
 
 // Historical index data
 const INDEX_HISTORY = [
@@ -42,6 +42,8 @@ const INDICES = ["Portfolio","Portfolio+Div","SP500","Dow","NASDAQ","TSX"]
 const COLORS  = { Portfolio:"#1d4ed8", "Portfolio+Div":"#16a34a", SP500:"#3b82f6", Dow:"#f59e0b", NASDAQ:"#8b5cf6", TSX:"#ef4444" }
 
 export default function AccountSummary({ stocks=[], transactions=[], dividends=[], prices={} }) {
+  const USD_CAD = getRate()
+
   const [activeLines, setActiveLines] = useState(new Set(["Portfolio","Portfolio+Div","SP500","TSX"]))
   const currentYear = new Date().getFullYear()
 
@@ -74,7 +76,7 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
 
   // Current year dividends
   const currentYearDivs = dividends
-    .filter(d => new Date(d.date).getFullYear()===currentYear)
+    .filter(d => d.date?.slice(0,4) === String(currentYear))
     .reduce((s,d) => s+(d.amount||0), 0)
 
   // ── Historical % change (excl contributions) ─────────────────────

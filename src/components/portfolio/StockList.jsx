@@ -1,26 +1,64 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Pencil, Trash2, RefreshCw, TrendingUp, TrendingDown } from "lucide-react"
+import { Pencil, Trash2, RefreshCw, TrendingUp, TrendingDown, Search, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useState, useMemo } from "react"
+
 export default function StockList({ stocks = [], prices = {}, onEdit, onDelete, onRefreshPrices, refreshing }) {
+  const [search, setSearch] = useState("")
+
   const fmt = (n, currency = "USD") =>
     n == null ? "-" : new Intl.NumberFormat("en-CA", { style: "currency", currency }).format(n)
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return stocks
+    const q = search.toLowerCase()
+    return stocks.filter(s =>
+      s.symbol?.toLowerCase().includes(q) ||
+      s.name?.toLowerCase().includes(q) ||
+      s.account_type?.toLowerCase().includes(q) ||
+      s.sector?.toLowerCase().includes(q)
+    )
+  }, [stocks, search])
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="text-base">Holdings</CardTitle>
-        <Button variant="outline" size="sm" onClick={onRefreshPrices} disabled={refreshing}>
-          <RefreshCw className={cn("h-4 w-4 mr-1.5", refreshing && "animate-spin")} />
-          {refreshing ? "Refreshing..." : "Refresh Prices"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+            <input
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search holdings..."
+              className="pl-8 pr-7 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-400 w-44"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={onRefreshPrices} disabled={refreshing}>
+            <RefreshCw className={cn("h-4 w-4 mr-1.5", refreshing && "animate-spin")} />
+            {refreshing ? "Refreshing..." : "Refresh Prices"}
+          </Button>
+        </div>
       </CardHeader>
+      {search && (
+        <div className="px-6 pb-2 text-xs text-gray-400">
+          {filtered.length} of {stocks.length} holdings
+        </div>
+      )}
       <CardContent className="p-0">
-        {stocks.length === 0 ? (
+        {filtered.length === 0 && stocks.length > 0 ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">No holdings match "{search}"</div>
+        ) : stocks.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground text-sm">No stocks yet. Click Add Stock to get started.</div>
         ) : (
           <div className="divide-y">
-            {stocks.map(stock => {
+            {filtered.map(stock => {
               const q = prices[stock.symbol]
               const marketValue = q?.price ? q.price * stock.shares : stock.avg_cost * stock.shares
               const costBasis = stock.avg_cost * stock.shares

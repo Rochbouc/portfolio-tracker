@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { Pencil, Check, X, PiggyBank, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react"
@@ -27,14 +28,12 @@ function load() {
 }
 function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
 
-const USD_CAD_RATE = 1.37
-
 function fmt(n, cur="CAD", displayCur="CAD") {
   if (!n && n !== 0) return ""
-  // Convert if needed
+  const rate = getRate()
   let val = n
-  if (cur === "USD" && displayCur === "CAD") val = n * USD_CAD_RATE
-  if (cur === "CAD" && displayCur === "USD") val = n / USD_CAD_RATE
+  if (cur === "USD" && displayCur === "CAD") val = n * rate
+  if (cur === "CAD" && displayCur === "USD") val = n / rate
   const currency = displayCur || "CAD"
   return new Intl.NumberFormat("en-CA",{style:"currency",currency,minimumFractionDigits:2,maximumFractionDigits:2}).format(val)
 }
@@ -80,7 +79,8 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
   const [showAdd,       setShowAdd]      = useState(false)
   const [collapsed,     setCollapsed]    = useState({})
   const displayCur = globalCurrency  // use master switch
-  const USD_CAD = 1.37
+  const USD_CAD = getRate()
+  const USD_CAD_RATE = USD_CAD  // alias used throughout
   const currentYear = new Date().getFullYear()
 
   const stockCurrencyMap = useMemo(() => {
@@ -152,7 +152,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
   const liveByKey = useMemo(() => {
     const map = {}
     dividends
-      .filter(d => new Date(d.date).getFullYear() === currentYear)
+      .filter(d => d.date?.slice(0,4) === String(currentYear))
       .forEach(d => {
         const stock = stocks.find(s => s.id === d.stock_id)
         if (stock) {
@@ -184,7 +184,7 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
         const s = (d.symbol || d.notes?.split(" — ")[0] || "Cash").toUpperCase()
         return s === sym && (d.account_type || "RRSP") === acct
       }) : null
-      const cur = stock?.currency || cashDiv?.currency || "USD"
+      const cur = stock?.currency || cashDiv?.currency || "CAD"
       if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
       if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
       return amount
@@ -212,11 +212,12 @@ export default function HistoricalDividends({ dividends = [], stocks = [], globa
         const s = (d.symbol || d.notes?.split(" — ")[0] || "Cash").toUpperCase()
         return s === sym && (d.account_type || "RRSP") === acct
       }) : null
-      const cur = stock?.currency || cashDiv?.currency || "USD"
+      const cur = stock?.currency || cashDiv?.currency || "CAD"
       if (cur === "USD" && displayCur === "CAD") return amount * USD_CAD_RATE
       if (cur === "CAD" && displayCur === "USD") return amount / USD_CAD_RATE
       return amount
     }
+    const totals = {}
     accountOrder.forEach(acct => {
       totals[acct] = {}
       YEARS.forEach(y => {

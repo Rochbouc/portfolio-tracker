@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { TrendingUp, TrendingDown } from "lucide-react"
@@ -37,7 +38,7 @@ function fmtPct(n) { if (n == null) return "—"; return (n>=0?"+":"")+n.toFixed
 
 const COLORS = {SP500:"#3b82f6",NASDAQ:"#8b5cf6",TSX:"#10b981",DowJones:"#f59e0b",portfolio:"#1d4ed8",withDiv:"#16a34a"}
 
-export default function YearOverYearPerformance({ stocks=[], transactions=[], dividends=[], prices={} }) {
+export default function YearOverYearPerformance({ stocks=[], transactions=[], dividends=[], prices={}, totalValue=null, totalDividendsReceived=null, estAnnualDividends=null }) {
   const [history, setHistory] = useState(() => load() || PORTFOLIO_HISTORY_DEFAULTS.map(r => ({...r})))
   const [editingRow, setEditingRow] = useState(null)
   const [editDraft,  setEditDraft]  = useState({})
@@ -45,53 +46,72 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
 
   // Compute live current year
   const currentYear = new Date().getFullYear()
+  const USD_CAD = getRate()
+  // Live market value in CAD (convert USD stocks)
   const liveMarketValue = stocks.reduce((s,st) => {
-    const p = prices[st.symbol]?.price ?? st.avg_cost
-    return s + p * (st.shares||0)
+    const p   = prices[st.symbol]?.price ?? st.avg_cost
+    const val = p * (st.shares||0)
+    return s + (st.currency==="USD" ? val * USD_CAD : val)
   }, 0)
-  const liveInvested = stocks.reduce((s,st) => s + st.avg_cost * (st.shares||0), 0)
+  const liveInvested = stocks.reduce((s,st) => {
+    const val = st.avg_cost * (st.shares||0)
+    return s + (st.currency==="USD" ? val * USD_CAD : val)
+  }, 0)
 
-  // Current year contributions from transactions
+  // Current year contributions from transactions (CAD)
   const currentYearContrib = transactions
-    .filter(t => t.type==="buy" && new Date(t.date).getFullYear()===currentYear)
-    .reduce((s,t) => s + (t.shares * t.price), 0)
+    .filter(t => t.type==="buy" && t.date?.slice(0,4) === String(currentYear))
+    .reduce((s,t) => {
+      const stock = stocks.find(st=>st.id===t.stock_id)
+      const val   = (t.shares||0) * (t.price||0)
+      return s + (stock?.currency==="USD" ? val * USD_CAD : val)
+    }, 0)
 
+  // Current year dividends in CAD (same as main page)
   const currentYearDivs = dividends
-    .filter(d => new Date(d.date).getFullYear()===currentYear)
-    .reduce((s,d) => s + (d.amount||0), 0)
+    .filter(d => d.date?.slice(0,4) === String(currentYear))
+    .reduce((s,d) => {
+      const cur = d.currency || "CAD"
+      return s + (cur==="USD" ? (d.amount||0) * USD_CAD : (d.amount||0))
+    }, 0)
 
   // Build full data: historical + live current year
+  // Always replace current year with live data — never use stale stored values
   const fullData = useMemo(() => {
-    const rows = [...history]
-    // Check if current year already in history
-    if (!rows.find(r => r.year === currentYear) && liveMarketValue > 0) {
-      const prevYear = rows.find(r => r.year === currentYear - 1)
+    const rows = history.filter(r => r.year !== currentYear)
+    const prevYear = rows.find(r => r.year === currentYear - 1)
+    const liveMV    = totalValue || liveMarketValue
+    const liveActD  = totalDividendsReceived || currentYearDivs
+    const USD_CAD_R = getRate()
+    const projDivEst = estAnnualDividends || stocks.reduce((s,st) => {
+      const rate = parseFloat(st.annual_dividend)||0
+      const val  = rate * (st.shares||0)
+      return s + (st.currency==="USD" ? val * USD_CAD_R : val)
+    }, 0)
+    if (liveMV > 0) {
       rows.push({
         year: currentYear,
         invested: prevYear?.marketValue || liveInvested,
-        marketValue: liveMarketValue,
+        marketValue: liveMV,
         cashDep: currentYearContrib,
-        projDiv: 0,
-        actDiv: currentYearDivs,
+        projDiv: Math.round(projDivEst),
+        actDiv: liveActD,
         isLive: true,
       })
     }
-    // Add % change excluding contributions, and with dividends
+    rows.sort((a,b) => a.year - b.year)
     return rows.map((row, i) => {
       const prev = rows[i-1]
-      // % change excluding contributions = (marketValue - contributions) / prevMarketValue - 1
       let pctChange = null
       if (prev && prev.marketValue > 0) {
         const gain = row.marketValue - row.cashDep - prev.marketValue
         pctChange = (gain / prev.marketValue) * 100
       }
-      const totalWithDiv = row.marketValue + row.actDiv
       let pctWithDiv = null
       if (prev && prev.marketValue > 0) {
         const gainWithDiv = (row.marketValue + row.actDiv) - row.cashDep - prev.marketValue
         pctWithDiv = (gainWithDiv / prev.marketValue) * 100
       }
-      // Index % change
       const idxChanges = {}
       Object.entries(INDEX_DATA).forEach(([idx, vals]) => {
         const cur  = vals[row.year]
@@ -100,8 +120,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
       })
       return { ...row, pctChange, pctWithDiv, idxChanges }
     })
-  }, [history, liveMarketValue, currentYearContrib, currentYearDivs])
-
+  }, [history, liveMarketValue, currentYearContrib, currentYearDivs, totalValue, totalDividendsReceived, estAnnualDividends, stocks])
   // Chart data
   const chartData = fullData.map(r => ({
     year: String(r.year),
@@ -161,7 +180,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
         </Card>
         <Card className="bg-white p-4">
           <div className="text-xs text-gray-400 mb-1">Live Market Value</div>
-          <div className="text-xl font-bold text-blue-700">{fmt(liveMarketValue)}</div>
+          <div className="text-xl font-bold text-blue-700">{fmt(totalValue || liveMarketValue)}</div>
           <div className="text-xs text-gray-400">{currentYear}</div>
         </Card>
         <Card className="bg-white p-4">

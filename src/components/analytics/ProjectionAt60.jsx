@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts"
 import { Target, RotateCcw, Pencil, Check, X, Plus, Trash2 } from "lucide-react"
@@ -38,9 +38,47 @@ const RATES       = [0.12, 0.10, 0.08, 0.06, 0.04, 0.02]
 const RATE_LABELS = ["12%","10%","8%","6%","4%","2%"]
 const RATE_COLORS = ["#6366f1","#3b82f6","#10b981","#f59e0b","#f97316","#6b7280"]
 
+function ensureActuals(accounts) {
+  const result = {}
+  Object.entries(accounts).forEach(([id, acct]) => {
+    result[id] = {
+      ...acct,
+      actuals: acct.actuals || {},
+      contributions: acct.contributions || {},
+    }
+  })
+  return result
+}
+
 function loadAccounts() {
-  try { const s = JSON.parse(localStorage.getItem(STORAGE_KEY)); return s ? {...structuredClone(DEFAULTS),...s} : structuredClone(DEFAULTS) }
-  catch { return structuredClone(DEFAULTS) }
+  try {
+    const s = JSON.parse(localStorage.getItem(STORAGE_KEY))
+    if (!s) return ensureActuals(structuredClone(DEFAULTS))
+    // Validate s is a proper object
+    if (typeof s !== 'object' || Array.isArray(s)) {
+      localStorage.removeItem(STORAGE_KEY)
+      return ensureActuals(structuredClone(DEFAULTS))
+    }
+    // Deep merge: for each account, merge DEFAULTS with saved, ensuring actuals/contributions survive
+    const merged = structuredClone(DEFAULTS)
+    Object.entries(s).forEach(([id, saved]) => {
+      if (!saved || typeof saved !== 'object') return
+      if (merged[id]) {
+        merged[id] = {
+          ...merged[id],
+          ...saved,
+          actuals:       (saved.actuals && typeof saved.actuals === 'object' && !Array.isArray(saved.actuals)) ? saved.actuals : merged[id].actuals,
+          contributions: (saved.contributions && typeof saved.contributions === 'object' && !Array.isArray(saved.contributions)) ? saved.contributions : merged[id].contributions,
+        }
+      } else {
+        merged[id] = saved
+      }
+    })
+    return ensureActuals(merged)
+  } catch {
+    localStorage.removeItem(STORAGE_KEY)
+    return ensureActuals(structuredClone(DEFAULTS))
+  }
 }
 function saveAccounts(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
 
@@ -51,11 +89,13 @@ function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
 
 // formula: identical to spreadsheet
 function buildTable(acct) {
-  const { startAge, endAge, actuals, contributions } = acct
-  const actualAges = Object.keys(actuals).map(Number).sort((a,b) => a-b)
+  const { startAge, endAge, contributions } = acct
+  const actuals = acct.actuals || {}
+  const actualAges = Object.keys(actuals).map(Number).filter(n => !isNaN(n)).sort((a,b) => a-b)
+  if (actualAges.length === 0) return []
   const lastActAge = actualAges[actualAges.length-1]
   const rows = []
-  const projVals = RATES.map(() => actuals[lastActAge])
+  const projVals = RATES.map(() => actuals[lastActAge] || 0)
   for (let age = startAge; age <= endAge; age++) {
     const contrib  = contributions?.[age] ?? 0
     const actual   = actuals?.[age] ?? null
@@ -108,11 +148,13 @@ function EditableCell({ value, onSave, className, placeholder="—" }) {
 
 // ── Projection table ──────────────────────────────────────────────
 function ProjectionTable({ acctId, acct, onUpdateActual, onUpdateContrib, liveVal }) {
+  const currentAge = new Date().getFullYear() - 1973  // Roch born 1973
+
   const effectiveAcct = useMemo(() => {
     if (!liveVal) return acct
-    const lastActAge = Math.max(...Object.keys(acct.actuals).map(Number))
-    return { ...acct, actuals: { ...acct.actuals, [lastActAge]: liveVal } }
-  }, [acct, liveVal])
+    // Apply live value to current age — this becomes the "latest actual"
+    return { ...acct, actuals: { ...acct.actuals, [currentAge]: liveVal } }
+  }, [acct, liveVal, currentAge])
 
   const rows = useMemo(() => buildTable(effectiveAcct), [effectiveAcct])
   const chartData = rows.map(r => {
@@ -163,16 +205,22 @@ function ProjectionTable({ acctId, acct, onUpdateActual, onUpdateContrib, liveVa
           <tbody>
             {rows.map((r, idx) => {
               const prevActual = rows[idx-1]?.actual
-              const actualPct  = prevActual && r.actual ? ((r.actual - prevActual) / prevActual * 100) : null
+              const actualPct  = prevActual && r.actual
+                ? ((r.actual - prevActual - (r.contrib || 0)) / prevActual * 100)
+                : null
               const isRetire   = r.age === acct.retireAge
               const isGoalAge  = r.age === acct.goalAge
+              const isLiveRow  = liveVal && r.age === currentAge
               return (
                 <tr key={r.age} className={cn("border-b border-gray-100 hover:bg-blue-50/20 transition-colors",
+                  isLiveRow ? "bg-emerald-50 ring-1 ring-inset ring-emerald-200" : "",
                   isRetire ? "bg-blue-50 font-semibold" : "", isGoalAge ? "bg-amber-50" : "")}>
                   <td className={cn("px-2 py-1 sticky left-0 font-semibold z-10",
+                    isLiveRow ? "text-emerald-700 bg-emerald-50" :
                     isRetire ? "text-blue-700 bg-blue-50" : "text-gray-700 bg-white")}>
                     {r.age}
-                    {isRetire && <span className="ml-1 text-[9px] text-blue-400">← retire</span>}
+                    {isLiveRow && <span className="ml-1 text-[9px] text-emerald-500">● live</span>}
+                    {isRetire && !isLiveRow && <span className="ml-1 text-[9px] text-blue-400">← retire</span>}
                     {isGoalAge && !isRetire && <span className="ml-1 text-[9px] text-amber-500">⚑</span>}
                   </td>
                   <EditableCell value={r.contrib||null} onSave={val => onUpdateContrib(r.age, val??0)}
@@ -229,7 +277,7 @@ function InlineNumber({ value, onSave, prefix="$", suffix="", label="", dark=fal
 }
 
 // ── Main component ────────────────────────────────────────────────
-export default function ProjectionAt60({ stocks = [], prices = {} }) {
+export default function ProjectionAt60({ stocks = [], prices = {}, totalValue = 0 }) {
   const [accounts,      setAccounts]      = useState(() => loadAccounts())
   const [settings,      setSettings]      = useState(() => {
     const saved = loadSettings()
@@ -248,11 +296,48 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
   const [showAddAcct,   setShowAddAcct]   = useState(false)
   const [newAcctName,   setNewAcctName]   = useState("")
 
-  // Live portfolio value for Roch Personal
-  const livePersonal = stocks.reduce((s, st) => {
+  // Live portfolio value — use the passed-in totalValue which matches the Holdings header
+  const livePersonal = totalValue || stocks.reduce((s, st) => {
     const p = prices[st.symbol]?.price ?? st.avg_cost
     return s + p * (st.shares || 0)
   }, 0)
+
+  // Auto-lock: on Jan 1, if previous year's age isn't locked yet, save the last known live value
+  // We store the last known live value daily so we can lock it at year-end
+  useEffect(() => {
+    if (!livePersonal || livePersonal <= 0) return
+    const today     = new Date()
+    const yr        = today.getFullYear()
+    const rochAge   = yr - 1973
+    const prevAge   = rochAge - 1  // previous year's age
+    const prevYrKey = `proj_live_${yr - 1}`  // key for previous year's saved value
+
+    // Save today's live value so we have it for year-end
+    const todayKey = `proj_live_${yr}`
+    try { localStorage.setItem(todayKey, String(livePersonal)) } catch {}
+
+    // Check if it's Jan 1 (first 3 days of year) and previous year isn't locked
+    const isNewYear = today.getMonth() === 0 && today.getDate() <= 3
+    if (isNewYear) {
+      const prevSaved = localStorage.getItem(prevYrKey)
+      const prevVal   = prevSaved ? parseFloat(prevSaved) : null
+      if (prevVal && prevVal > 0) {
+        // Check if previous year's age is already hardcoded in actuals
+        const existingActuals = accounts?.roch?.actuals || {}
+        if (!existingActuals[prevAge] || existingActuals[prevAge] === livePersonal) {
+          // Auto-lock previous year's value
+          setAccounts(prev => {
+            const next = { ...prev }
+            if (!next.roch) return prev
+            next.roch = { ...next.roch, actuals: { ...next.roch.actuals, [prevAge]: prevVal } }
+            saveAccounts(next)
+            return next
+          })
+          console.log(`Auto-locked ${yr-1} value at age ${prevAge}: ${prevVal}`)
+        }
+      }
+    }
+  }, [livePersonal])
 
   function updateSetting(key, val) {
     setSettings(prev => { const next = {...prev, [key]:val}; saveSettings(next); return next })
@@ -328,34 +413,31 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
         let acct = accounts[id]
         if (!acct) return sum
 
+        // Guard: skip if no actuals
+        const actualKeys = Object.keys(acct.actuals || {}).map(Number).filter(n => !isNaN(n))
+        if (actualKeys.length === 0) return sum
+
         // Override last actual with live price for Roch Personal
         if (id === "roch" && livePersonal > 0) {
-          const lastActAge = Math.max(...Object.keys(acct.actuals).map(Number))
+          const lastActAge = Math.max(...actualKeys)
           acct = { ...acct, actuals: { ...acct.actuals, [lastActAge]: livePersonal } }
         }
 
         // Find last known actual value and its age
-        const actualAges = Object.keys(acct.actuals).map(Number).sort((a, b) => a - b)
+        const actualAges = Object.keys(acct.actuals).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b)
+        if (actualAges.length === 0) return sum
         const lastActAge = actualAges[actualAges.length - 1]
         let value = acct.actuals[lastActAge] || 0
 
         // Determine the retire year for this account
-        // retireAge is age-based; convert to year using Roch birth year 1973
-        // Each account's retireAge maps to a target year
         const BIRTH_YEARS = { roch: 1973, rrrsp: 1973, drrsp: 1971, dcorpo: 1971 }
         const birthYear = BIRTH_YEARS[id] || 1973
         const acctRetireYear = birthYear + (acct.retireAge || 60)
-
-        // Also respect the global retireYear setting — use whichever comes first
         const targetYear = Math.min(acctRetireYear, settings.retireYear + 2)
-
-        // Convert lastActAge to a year
         const lastActYear = birthYear + lastActAge
         const currentYear = new Date().getFullYear()
 
-        // Compound from current year to target year
         for (let yr = Math.max(lastActYear + 1, currentYear); yr <= targetYear; yr++) {
-          // Age in this year
           const ageThisYear = yr - birthYear
           const contrib = acct.contributions?.[ageThisYear] ?? 0
           value = value * (1 + rate) + contrib
@@ -374,6 +456,22 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
     { id:"summary", label:"Scenarios" },
   ]
   const activeAcct = accounts[activeSection]
+
+  // Safety check - if accounts is broken, offer reset
+  if (!accounts || typeof accounts !== 'object' || Object.keys(accounts).length === 0) {
+    return (
+      <div className="p-8 text-center">
+        <div className="text-red-500 font-semibold mb-2">⚠️ Projection data could not be loaded</div>
+        <button onClick={() => {
+          localStorage.removeItem("proj60_accounts_v3")
+          localStorage.removeItem("proj60_settings_v1")
+          window.location.reload()
+        }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+          Reset to Defaults
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -403,9 +501,11 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
             {settings.includedIds.map(id => {
               const acct = accounts[id]
               if (!acct) return null
+              const actualKeys = Object.keys(acct.actuals || {}).map(Number).filter(n => !isNaN(n))
+              if (actualKeys.length === 0) return null
               const BIRTH_YEARS = { roch: 1973, rrrsp: 1973, drrsp: 1971, dcorpo: 1971 }
               const byr = BIRTH_YEARS[id] || 1973
-              const lastActAge = Math.max(...Object.keys(acct.actuals).map(Number))
+              const lastActAge = Math.max(...actualKeys)
               const lastActVal = (id === "roch" && livePersonal > 0) ? livePersonal : acct.actuals[lastActAge]
               const lastActYear = byr + lastActAge
               const acctRetireYear = byr + (acct.retireAge || 60)
@@ -553,6 +653,23 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
                 </div>
               </div>
               <div className="flex gap-2">
+                {/* Lock current year's live value for Roch Personal */}
+                {activeSection === "roch" && livePersonal > 0 && (() => {
+                  const currentAge = new Date().getFullYear() - 1973
+                  const isLocked = activeAcct.actuals?.[currentAge] && activeAcct.actuals[currentAge] !== livePersonal
+                  return (
+                    <button onClick={() => {
+                      const age = currentAge
+                      const val = Math.round(livePersonal * 100) / 100
+                      if (confirm(`Lock ${new Date().getFullYear()} value at ${new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:2}).format(val)} for age ${age}?\n\nThis saves your current live portfolio value as a permanent actual. Use at year-end.`)) {
+                        updateActual("roch", age, val)
+                      }
+                    }}
+                    className="flex items-center gap-1.5 text-[11px] text-green-600 hover:text-green-700 border border-green-200 hover:border-green-400 rounded px-2.5 py-1.5 transition-colors bg-green-50">
+                      🔒 Lock {new Date().getFullYear()} Value
+                    </button>
+                  )
+                })()}
                 {DEFAULTS[activeSection] && (
                   <button onClick={() => resetAccount(activeSection)}
                     className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-orange-600 border border-gray-200 hover:border-orange-300 rounded px-2.5 py-1.5 transition-colors">
@@ -610,7 +727,8 @@ export default function ProjectionAt60({ stocks = [], prices = {} }) {
                     const acctRetireYear = birthYear + (acct.retireAge || 60)
 
                     // Last actual value
-                    const actualAges = Object.keys(acct.actuals).map(Number).sort((a,b) => a-b)
+                    const actualAges = Object.keys(acct.actuals || {}).map(Number).filter(n=>!isNaN(n)).sort((a,b) => a-b)
+                    if (actualAges.length === 0) return null
                     const lastActAge  = actualAges[actualAges.length - 1]
                     const lastActYear = birthYear + lastActAge
                     const lastActVal  = (id === "roch" && livePersonal > 0) ? livePersonal : (acct.actuals[lastActAge] || 0)
