@@ -241,6 +241,10 @@ export default function PortfolioPerformanceChart({
         {/* Stats */}
         <div className="flex gap-5 mt-1.5 flex-wrap">
           <div>
+            <div className="text-xs text-gray-400">Total Invested</div>
+            <div className="text-sm font-bold text-gray-700">{fmtCur(costBasis, globalCurrency)}</div>
+          </div>
+          <div>
             <div className="text-xs text-gray-400">Current Value</div>
             <div className="text-sm font-bold text-gray-900">{fmtCur(currentTotal, globalCurrency)}</div>
           </div>
