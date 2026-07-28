@@ -59,23 +59,19 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
   }, 0)
 
   // Current year contributions from transactions (CAD)
-  // Current year contributions — prefer manually entered value from Settings if available
+  // Contributions = $23,520 known as of 2026-07-28 + any new buys after that
   const currentYearContrib = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
-      const yearData = stored[currentYear] || {}
-      const manualTotal = yearData.totalOverride > 0
-        ? yearData.totalOverride
-        : Object.values(yearData).reduce((s, acct) => s + (typeof acct === 'object' ? (parseFloat(acct.contributed) || 0) : 0), 0)
-      if (manualTotal > 0) return manualTotal
-    } catch {}
-    return transactions
-      .filter(t => t.type==="buy" && t.date?.slice(0,4) === String(currentYear))
-      .reduce((s,t) => {
+    const cutoff = new Date("2026-07-28")
+    let total = 23520
+    transactions.forEach(t => {
+      const txDate = new Date(t.date)
+      if (t.type==="buy" && txDate > cutoff && t.date?.slice(0,4) === String(currentYear)) {
         const stock = stocks.find(st=>st.id===t.stock_id)
-        const val   = (t.shares||0) * (t.price||0)
-        return s + (stock?.currency==="USD" ? val * USD_CAD : val)
-      }, 0)
+        const val = (t.shares||0) * (t.price||0)
+        total += stock?.currency==="USD" ? val * USD_CAD : val
+      }
+    })
+    return total
   })()
 
   // Current year dividends in CAD (same as main page)

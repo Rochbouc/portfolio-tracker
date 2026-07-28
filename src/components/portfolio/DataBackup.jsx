@@ -173,24 +173,7 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
           <div className="mt-4 mb-2">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">📊 {year} Contribution Tracking</h3>
 
-            {/* Quick total override */}
-            <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="flex items-center gap-3">
-                <label className="text-xs font-semibold text-blue-700 w-48">Total {year} Contributions (all accounts)</label>
-                <input
-                  type="number"
-                  placeholder="e.g. 23520"
-                  value={contribs[year]?.totalOverride || ""}
-                  onChange={e => {
-                    const val = parseFloat(e.target.value) || 0
-                    const next = { ...contribs, [year]: { ...(contribs[year]||{}), totalOverride: val } }
-                    saveContribs(next)
-                  }}
-                  className="w-32 text-sm border border-blue-300 rounded px-2 py-1 text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <span className="text-xs text-blue-500">Used for YTD gain calculation</span>
-              </div>
-            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {["RRSP","TFSA"].map(acct => {
                 const data = thisYear[acct] || {}

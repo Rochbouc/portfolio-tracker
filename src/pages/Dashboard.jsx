@@ -986,23 +986,20 @@ function DashboardInner() {
   const totalCost = stocks.reduce((s, st) =>
     s + toGlobalCurrency(st.avg_cost * st.shares, st.currency || "USD"), 0);
 
-  // Total gain excludes current-year contributions (cash deposited this year)
+  // Total gain excludes current-year contributions
   const currentYear = new Date().getFullYear();
+  // $23,520 known as of 2026-07-28 + any new buys after that date
   const currentYearContribs = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
-      const yearData = stored[currentYear] || {}
-      const manualTotal = yearData.totalOverride > 0
-        ? yearData.totalOverride
-        : Object.values(yearData).reduce((s, acct) => s + (typeof acct === 'object' ? (parseFloat(acct.contributed) || 0) : 0), 0)
-      if (manualTotal > 0) return manualTotal
-    } catch {}
-    return transactions
-      .filter(t => t.type === "buy" && new Date(t.date).getFullYear() === currentYear)
-      .reduce((s, t) => {
-        const stock = stocks.find(st => st.id === t.stock_id);
-        return s + toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD");
-      }, 0);
+    const cutoff = new Date("2026-07-28")
+    let total = 23520
+    transactions.forEach(t => {
+      const txDate = new Date(t.date)
+      if (t.type === "buy" && txDate > cutoff && txDate.getFullYear() === currentYear) {
+        const stock = stocks.find(st => st.id === t.stock_id)
+        total += toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD")
+      }
+    })
+    return total
   })();
   const totalGain    = totalValue - totalCost;
   const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;

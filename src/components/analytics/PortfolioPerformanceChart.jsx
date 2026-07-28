@@ -118,21 +118,22 @@ export default function PortfolioPerformanceChart({
       return Math.max(0, shares)
     }
 
-    // Contributions in range — prefer manually entered value from Settings
+    // Contributions = $23,520 known as of 2026-07-28 + any new buys after that date
     let ytdContribs = 0
     if (range === "ytd") {
-      try {
-        const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
-        const yr = today.getFullYear()
-        const yearData = stored[yr] || {}
-        const manualTotal = yearData.totalOverride > 0
-          ? yearData.totalOverride
-          : Object.values(yearData).reduce((s, acct) => s + (typeof acct === 'object' ? (parseFloat(acct.contributed) || 0) : 0), 0)
-        if (manualTotal > 0) { ytdContribs = manualTotal }
-      } catch {}
-    }
-    if (ytdContribs === 0) {
-      // Fallback: calculate from transactions
+      const cutoff = new Date("2026-07-28")
+      // Base amount known as of cutoff
+      ytdContribs = 23520
+      // Add any new buy transactions after the cutoff date
+      transactions.forEach(tx => {
+        const txDate = new Date(tx.date)
+        if (txDate > cutoff && txDate <= today && tx.type === "buy") {
+          const stock = stocks.find(s => s.id === tx.stock_id)
+          ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
+        }
+      })
+    } else {
+      // For other ranges, calculate all from transactions
       transactions.forEach(tx => {
         const txDate = new Date(tx.date)
         if (txDate >= startDate && txDate <= today && tx.type === "buy") {
