@@ -143,15 +143,30 @@ export default function PortfolioPerformanceChart({
     }
     datePts.push(new Date(today))
 
+    // Get YoY history for accurate start-of-year values
+    let yoyHistory = []
+    try {
+      yoyHistory = JSON.parse(localStorage.getItem("yoy_portfolio_history_v1") || "[]") || []
+    } catch {}
+
     datePts.forEach(dt => {
       let total = 0
       const acctVals = {}
       const isToday = dt >= today
+      // For Jan 1 of current year, use the prior year's actual market value from YoY history
+      const isJan1 = dt.getMonth() === 0 && dt.getDate() === 1 && dt.getFullYear() === yr
+      if (isJan1 && yoyHistory.length) {
+        const prevRow = yoyHistory.find(r => String(r.year) === String(yr - 1))
+        if (prevRow?.marketValue > 0) {
+          const pt2 = { date: dt.toLocaleDateString("en-CA", {month:"short", day:"numeric"}), "Total Portfolio": Math.round(prevRow.marketValue) }
+          accts.forEach(a => { pt2[a] = 0 })
+          points.push(pt2)
+          return
+        }
+      }
       stocks.forEach(s => {
         const sh = sharesAtDate(s.id, dt)
         if (sh <= 0) return
-        // Use live price only for today's point, avg_cost for historical
-        // This shows actual invested cost over time, with today's market value at the end
         const p = isToday
           ? (prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0)
           : (s.avg_cost ?? 0)
@@ -167,8 +182,18 @@ export default function PortfolioPerformanceChart({
       points.push(pt)
     })
 
-    // Start value = first point
-    const startVal = points[0]?.["Total Portfolio"] || 0
+    // Start value = use YearOverYear history for accurate year-end values
+    // For YTD: use prior year's actual market value (not avg_cost based)
+    let startVal = points[0]?.["Total Portfolio"] || 0
+    if (range === "ytd") {
+      try {
+        const yoyHistory = JSON.parse(localStorage.getItem("yoy_portfolio_history_v1") || "null")
+        if (yoyHistory?.length) {
+          const prevYearRow = yoyHistory.find(r => String(r.year) === String(yr - 1))
+          if (prevYearRow?.marketValue > 0) startVal = prevYearRow.marketValue
+        }
+      } catch {}
+    }
 
     return { startValue: startVal, ytdContributions: ytdContribs, chartData: points, accountNames: accts }
   }, [stocks, prices, transactions, range, globalCurrency])

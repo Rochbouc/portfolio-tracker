@@ -23,7 +23,7 @@ const PORTFOLIO_HISTORY_DEFAULTS = [
   {year:2023, invested:83398,   marketValue:111304,  cashDep:3000,     projDiv:2982.19, actDiv:3325},
   {year:2024, invested:100700.17,marketValue:146150.65,cashDep:8192,   projDiv:4220.99, actDiv:4712.83},
   {year:2025, invested:146150.65,marketValue:193424.97,cashDep:8235,   projDiv:3958.38, actDiv:4677.58},
-  {year:2026, invested:193424.97,marketValue:242662.32,cashDep:13520,  projDiv:8142.43, actDiv:3027.14},
+  {year:2026, invested:193424.97,marketValue:242662.32,cashDep:23520,  projDiv:8142.43, actDiv:3027.14},
 ]
 
 const STORAGE_KEY = "yoy_portfolio_history_v1"
@@ -59,13 +59,22 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
   }, 0)
 
   // Current year contributions from transactions (CAD)
-  const currentYearContrib = transactions
-    .filter(t => t.type==="buy" && t.date?.slice(0,4) === String(currentYear))
-    .reduce((s,t) => {
-      const stock = stocks.find(st=>st.id===t.stock_id)
-      const val   = (t.shares||0) * (t.price||0)
-      return s + (stock?.currency==="USD" ? val * USD_CAD : val)
-    }, 0)
+  // Current year contributions — prefer manually entered value from Settings if available
+  const currentYearContrib = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
+      const manualTotal = Object.values(stored[currentYear] || {})
+        .reduce((s, acct) => s + (parseFloat(acct.contributed) || 0), 0)
+      if (manualTotal > 0) return manualTotal
+    } catch {}
+    return transactions
+      .filter(t => t.type==="buy" && t.date?.slice(0,4) === String(currentYear))
+      .reduce((s,t) => {
+        const stock = stocks.find(st=>st.id===t.stock_id)
+        const val   = (t.shares||0) * (t.price||0)
+        return s + (stock?.currency==="USD" ? val * USD_CAD : val)
+      }, 0)
+  })()
 
   // Current year dividends in CAD (same as main page)
   const currentYearDivs = dividends
