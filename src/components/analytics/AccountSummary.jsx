@@ -41,11 +41,39 @@ function pct(n) { return n==null ? "—" : (n>=0?"+":"")+Number(n).toFixed(2)+"%
 const INDICES = ["Portfolio","Portfolio+Div","SP500","Dow","NASDAQ","TSX"]
 const COLORS  = { Portfolio:"#1d4ed8", "Portfolio+Div":"#16a34a", SP500:"#3b82f6", Dow:"#f59e0b", NASDAQ:"#8b5cf6", TSX:"#ef4444" }
 
-export default function AccountSummary({ stocks=[], transactions=[], dividends=[], prices={} }) {
+export default function AccountSummary({ stocks=[], transactions=[], dividends=[], prices={}, totalValue=null, totalDividendsReceived=null, estAnnualDividends=null }) {
   const USD_CAD = getRate()
+  const currentYear = new Date().getFullYear()
+  const YOY_STORAGE = "yoy_portfolio_history_v1"
+
+  // Read history from shared YearOverYear localStorage — edits in YoY show here too
+  const [historyRaw, setHistoryRaw] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(YOY_STORAGE) || "null")
+      if (saved?.length) return saved
+    } catch {}
+    return PORTFOLIO_HISTORY.map(r => ({ ...r, year: parseInt(r.year) }))
+  })
+
+  // Editing state for inline edits
+  const [editingRow, setEditingRow] = useState(null)
+  const [editDraft,  setEditDraft]  = useState({})
+
+  function startEdit(row) {
+    setEditingRow(row.year)
+    setEditDraft({ marketValue: row.marketValue, cashDep: row.cashDep, actDiv: row.actDiv })
+  }
+  function saveEdit(year) {
+    const next = historyRaw.map(r => r.year === year
+      ? { ...r, marketValue: parseFloat(editDraft.marketValue)||0, cashDep: parseFloat(editDraft.cashDep)||0, actDiv: parseFloat(editDraft.actDiv)||0 }
+      : r
+    )
+    setHistoryRaw(next)
+    localStorage.setItem(YOY_STORAGE, JSON.stringify(next))
+    setEditingRow(null)
+  }
 
   const [activeLines, setActiveLines] = useState(new Set(["Portfolio","Portfolio+Div","SP500","TSX"]))
-  const currentYear = new Date().getFullYear()
 
   // ── Live portfolio value in CAD ──────────────────────────────────
   const liveMarketCAD = useMemo(() => stocks.reduce((s, st) => {
@@ -80,36 +108,53 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
     .reduce((s,d) => s+(d.amount||0), 0)
 
   // ── Historical % change (excl contributions) ─────────────────────
-  const histWithChange = PORTFOLIO_HISTORY.map((row, i, arr) => {
-    const prev = arr[i-1]
+  // Always replace current year with live data
+  const histBase = historyRaw.filter(r => String(r.year) !== String(currentYear))
+  const prevHistRow = histBase[histBase.length - 1]
+
+  const liveMV   = totalValue || liveMarketCAD
+  const liveActD = totalDividendsReceived || dividends
+    .filter(d => d.date?.slice(0,4) === String(currentYear))
+    .reduce((s,d) => {
+      const stock = stocks.find(st => st.id === d.stock_id)
+      const cur = d.currency || stock?.currency || "CAD"
+      return s + (cur==="USD" ? (d.amount||0)*USD_CAD : (d.amount||0))
+    }, 0)
+
+  const liveRow = liveMV > 0 ? {
+    year: String(currentYear),
+    marketValue: liveMV,
+    cashDep: currentYearContrib,
+    actDiv: liveActD,
+    isLive: true,
+  } : null
+
+  const allHistory = [...histBase.map(r => ({...r, year: String(r.year)})), ...(liveRow ? [liveRow] : [])]
+
+  const histWithChange = allHistory.map((row, i) => {
+    const prev = allHistory[i-1]
     const changePct = prev && prev.marketValue > 0
-      ? ((row.marketValue - row.cashDep - prev.marketValue) / prev.marketValue) * 100
+      ? ((row.marketValue - (row.cashDep||0) - prev.marketValue) / prev.marketValue) * 100
       : null
     return { ...row, changePct }
   })
 
-  // Prev year for live % calc
-  const prevHistRow = PORTFOLIO_HISTORY[PORTFOLIO_HISTORY.length - 1]
-  const livePct = prevHistRow && prevHistRow.marketValue > 0
-    ? ((liveMarketCAD - currentYearContrib - prevHistRow.marketValue) / prevHistRow.marketValue) * 100
-    : null
-
   // ── Performance chart data (all normalised to 100 at start) ──────
-  const allYears = [...PORTFOLIO_HISTORY.map(r=>r.year), String(currentYear)]
+  const allYears = allHistory.map(r => String(r.year))
   const base2018_SP500   = INDEX_HISTORY.find(r=>r.year==="2018")?.SP500  || 1
   const base2018_Dow     = INDEX_HISTORY.find(r=>r.year==="2018")?.Dow    || 1
   const base2018_NASDAQ  = INDEX_HISTORY.find(r=>r.year==="2018")?.NASDAQ || 1
   const base2018_TSX     = INDEX_HISTORY.find(r=>r.year==="2018")?.TSX    || 1
-  const basePortfolio    = PORTFOLIO_HISTORY[0]?.marketValue || 1
+  const basePortfolio    = allHistory[0]?.marketValue || 1
 
   const chartData = useMemo(() => {
-    const rows = [...PORTFOLIO_HISTORY, {
+    const rows = allHistory.filter(r => String(r.year) !== String(currentYear)).concat([{
       year: String(currentYear),
-      marketValue: liveMarketCAD,
+      marketValue: liveMV,
       cashDep: currentYearContrib,
-      actDiv: currentYearDivs,
+      actDiv: liveActD,
       isLive: true,
-    }]
+    }])
     return rows.map((row, i, arr) => {
       const idxRow = INDEX_HISTORY.find(r=>r.year===row.year)
       const pt = { year: row.year + (row.isLive?" (live)":"") }
@@ -134,7 +179,7 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
       }
       return pt
     })
-  }, [liveMarketCAD, currentYearContrib, currentYearDivs])
+  }, [historyRaw, liveMarketCAD, currentYearContrib, liveMV, liveActD])
 
   function toggleLine(k) {
     setActiveLines(prev => {
@@ -152,7 +197,7 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label:"Total Invested (CAD)",   value:fmt(liveInvestedCAD),   icon:<DollarSign className="h-4 w-4 text-blue-500"/>,   color:"text-blue-700" },
-          { label:"Market Value (CAD)",     value:fmt(liveMarketCAD),     icon:<TrendingUp  className="h-4 w-4 text-green-500"/>,  color:"text-green-700" },
+          { label:"Market Value (CAD)",     value:fmt(liveMV),     icon:<TrendingUp  className="h-4 w-4 text-green-500"/>,  color:"text-green-700" },
           { label:"Total Gain/Loss",        value:`${liveGainCAD>=0?"+":""}${fmt(liveGainCAD)} (${pct(liveGainPct)})`,
             icon:liveGainCAD>=0?<TrendingUp className="h-4 w-4 text-green-500"/>:<TrendingDown className="h-4 w-4 text-red-500"/>,
             color:liveGainCAD>=0?"text-green-700":"text-red-600" },
@@ -223,44 +268,55 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {histWithChange.map(row=>{
-                  const idxRow = INDEX_HISTORY.find(r=>r.year===row.year)
-                  const prevIdx = INDEX_HISTORY.find(r=>r.year===String(parseInt(row.year)-1))
+                {histWithChange.map(row => {
+                  const idxRow  = INDEX_HISTORY.find(r => r.year === String(row.year))
+                  const prevIdx = INDEX_HISTORY.find(r => r.year === String(parseInt(row.year)-1))
                   const sp500Pct = idxRow&&prevIdx ? ((idxRow.SP500-prevIdx.SP500)/prevIdx.SP500*100) : null
-                  const tsxPct  = idxRow&&prevIdx ? ((idxRow.TSX-prevIdx.TSX)/prevIdx.TSX*100)   : null
+                  const tsxPct   = idxRow&&prevIdx ? ((idxRow.TSX-prevIdx.TSX)/prevIdx.TSX*100)       : null
+                  const isEditing = editingRow === row.year
+                  const isLive    = row.isLive
+
                   return (
-                    <tr key={row.year} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-semibold text-gray-800">{row.year}</td>
-                      <td className="px-3 py-2">{row.marketValue>0 ? fmt(row.marketValue) : "—"}</td>
-                      <td className="px-3 py-2 text-gray-500">{row.cashDep>0 ? fmt(row.cashDep) : "—"}</td>
-                      <td className={cn("px-3 py-2 font-medium",row.changePct==null?"":row.changePct>=0?"text-green-600":"text-red-500")}>
+                    <tr key={row.year} className={cn("hover:bg-gray-50", isLive && "bg-blue-50 font-semibold border-t-2 border-blue-200")}>
+                      <td className="px-3 py-2 font-semibold text-gray-800">
+                        {String(row.year)}
+                        {isLive && <span className="ml-1 text-[10px] font-normal text-blue-400 bg-blue-100 px-1 py-0.5 rounded">live</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        {isLive ? <span className="text-blue-700">{fmt(row.marketValue)}</span>
+                         : isEditing ? <input type="number" value={editDraft.marketValue} onChange={e=>setEditDraft(p=>({...p,marketValue:e.target.value}))} className="w-24 text-xs border rounded px-1 py-0.5 text-right"/>
+                         : (row.marketValue>0 ? fmt(row.marketValue) : "—")}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {isEditing ? <input type="number" value={editDraft.cashDep} onChange={e=>setEditDraft(p=>({...p,cashDep:e.target.value}))} className="w-20 text-xs border rounded px-1 py-0.5 text-right"/>
+                         : (row.cashDep>0 ? fmt(row.cashDep) : "—")}
+                      </td>
+                      <td className={cn("px-3 py-2 font-medium", row.changePct==null?"":row.changePct>=0?"text-green-600":"text-red-500")}>
                         {row.changePct!=null ? pct(row.changePct) : "—"}
                       </td>
-                      <td className="px-3 py-2 text-green-600">{row.actDiv>0 ? fmt(row.actDiv) : "—"}</td>
-                      <td className={cn("px-3 py-2 text-xs",sp500Pct==null?"text-gray-300":sp500Pct>=0?"text-blue-600":"text-red-400")}>
+                      <td className="px-3 py-2 text-green-600">
+                        {isLive ? fmt(row.actDiv)
+                         : isEditing ? <input type="number" value={editDraft.actDiv} onChange={e=>setEditDraft(p=>({...p,actDiv:e.target.value}))} className="w-20 text-xs border rounded px-1 py-0.5 text-right"/>
+                         : (row.actDiv>0 ? fmt(row.actDiv) : "—")}
+                      </td>
+                      <td className={cn("px-3 py-2 text-xs", sp500Pct==null?"text-gray-300":sp500Pct>=0?"text-blue-600":"text-red-400")}>
                         {sp500Pct!=null ? pct(sp500Pct) : "—"}
                       </td>
-                      <td className={cn("px-3 py-2 text-xs",tsxPct==null?"text-gray-300":tsxPct>=0?"text-red-600":"text-red-400")}>
+                      <td className={cn("px-3 py-2 text-xs", tsxPct==null?"text-gray-300":tsxPct>=0?"text-red-600":"text-red-400")}>
                         {tsxPct!=null ? pct(tsxPct) : "—"}
+                      </td>
+                      <td className="px-2 py-2">
+                        {!isLive && (isEditing
+                          ? <div className="flex gap-1">
+                              <button onClick={() => saveEdit(row.year)} className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded">✓</button>
+                              <button onClick={() => setEditingRow(null)} className="text-[10px] bg-gray-300 text-gray-700 px-1.5 py-0.5 rounded">✕</button>
+                            </div>
+                          : <button onClick={() => startEdit(row)} className="text-[10px] text-gray-400 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-blue-50">✎</button>
+                        )}
                       </td>
                     </tr>
                   )
                 })}
-                {/* Live current year */}
-                <tr className="bg-blue-50 font-semibold border-t-2 border-blue-200">
-                  <td className="px-3 py-2 text-blue-700">
-                    {currentYear}
-                    <span className="ml-1.5 text-[10px] font-normal text-blue-400 bg-blue-100 px-1 py-0.5 rounded">live</span>
-                  </td>
-                  <td className="px-3 py-2 text-blue-700">{fmt(liveMarketCAD)}</td>
-                  <td className="px-3 py-2 text-gray-500">{currentYearContrib>0 ? fmt(currentYearContrib) : "—"}</td>
-                  <td className={cn("px-3 py-2",livePct==null?"":livePct>=0?"text-green-600":"text-red-500")}>
-                    {livePct!=null ? pct(livePct) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-green-600">{currentYearDivs>0 ? fmt(currentYearDivs) : "—"}</td>
-                  <td className="px-3 py-2 text-gray-400">—</td>
-                  <td className="px-3 py-2 text-gray-400">—</td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -276,8 +332,7 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
         <CardContent>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={[
-              ...PORTFOLIO_HISTORY.filter(r=>r.actDiv>0).map(r=>({year:r.year, amount:r.actDiv})),
-              ...(currentYearDivs>0 ? [{year:String(currentYear)+" (live)", amount:currentYearDivs}] : [])
+              ...allHistory.filter(r=>r.actDiv>0).map(r=>({year:String(r.year)+(r.isLive?' (live)':''), amount:r.actDiv}))
             ]} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false}/>
               <XAxis dataKey="year" tick={{fontSize:10}} axisLine={false} tickLine={false}/>

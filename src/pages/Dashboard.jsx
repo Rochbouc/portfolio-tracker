@@ -994,8 +994,8 @@ function DashboardInner() {
       const stock = stocks.find(st => st.id === t.stock_id);
       return s + toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD");
     }, 0);
-  const totalGain = totalValue - totalCost + currentYearContribs;
-  const totalGainPct = (totalCost - currentYearContribs) > 0 ? (totalGain / (totalCost - currentYearContribs)) * 100 : 0;
+  const totalGain    = totalValue - totalCost;
+  const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
   const thisYear = new Date().getFullYear();
   // All-time dividend totals — all entries including cash
   const totalDividendsCAD = dividends.reduce((s, d) => {
@@ -1751,14 +1751,14 @@ function DashboardInner() {
                         <div className="flex-1 min-w-[300px]"><WidgetErrorBoundary title="Dividend Charts"><DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} /></WidgetErrorBoundary></div>
                       </div>
                       <WidgetErrorBoundary title="Year over Year"><YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
-                      <WidgetErrorBoundary title="Account Summary"><AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} /></WidgetErrorBoundary>
+                      <WidgetErrorBoundary title="Account Summary"><AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
                     </div>
                   )})()
                 }
 
                 {/* ACCOUNT SUMMARY */}
                 {activeTab === "summary" && (
-                  <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} />
+                  <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} />
                 )}
 
                 {/* PROJECTION AT 60 */}

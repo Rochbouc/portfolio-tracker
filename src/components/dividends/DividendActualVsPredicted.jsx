@@ -172,12 +172,13 @@ export default function DividendActualVsPredicted({ stocks = [], dividends = [],
     const USD_CAD = getRate()
     dividends.forEach(d => {
       if (!d.date) return
-      const key = d.date.slice(0,7)  // "2026-01"
+      const key = d.date.slice(0,7)
       const stock = stocks.find(s => s.id === d.stock_id)
       const cur = d.currency || stock?.currency || "CAD"
-      const converted = (globalCurrency === "CAD" && cur === "USD") ? (d.amount||0) * USD_CAD
-        : (globalCurrency === "USD" && cur === "CAD") ? (d.amount||0) / USD_CAD
-        : (d.amount||0)
+      const amt = parseFloat(d.amount) || 0
+      const converted = (globalCurrency === "CAD" && cur === "USD") ? amt * USD_CAD
+        : (globalCurrency === "USD" && cur === "CAD") ? amt / USD_CAD
+        : amt
       if (key) map[key] = (map[key] || 0) + converted
     })
     return map
