@@ -124,8 +124,10 @@ export default function PortfolioPerformanceChart({
       try {
         const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
         const yr = today.getFullYear()
-        const manualTotal = Object.values(stored[yr] || {})
-          .reduce((s, acct) => s + (parseFloat(acct.contributed) || 0), 0)
+        const yearData = stored[yr] || {}
+        const manualTotal = yearData.totalOverride > 0
+          ? yearData.totalOverride
+          : Object.values(yearData).reduce((s, acct) => s + (typeof acct === 'object' ? (parseFloat(acct.contributed) || 0) : 0), 0)
         if (manualTotal > 0) { ytdContribs = manualTotal }
       } catch {}
     }

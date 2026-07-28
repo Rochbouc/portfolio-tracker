@@ -63,8 +63,10 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
   const currentYearContrib = (() => {
     try {
       const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
-      const manualTotal = Object.values(stored[currentYear] || {})
-        .reduce((s, acct) => s + (parseFloat(acct.contributed) || 0), 0)
+      const yearData = stored[currentYear] || {}
+      const manualTotal = yearData.totalOverride > 0
+        ? yearData.totalOverride
+        : Object.values(yearData).reduce((s, acct) => s + (typeof acct === 'object' ? (parseFloat(acct.contributed) || 0) : 0), 0)
       if (manualTotal > 0) return manualTotal
     } catch {}
     return transactions
