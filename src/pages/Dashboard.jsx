@@ -988,12 +988,20 @@ function DashboardInner() {
 
   // Total gain excludes current-year contributions (cash deposited this year)
   const currentYear = new Date().getFullYear();
-  const currentYearContribs = transactions
-    .filter(t => t.type === "buy" && new Date(t.date).getFullYear() === currentYear)
-    .reduce((s, t) => {
-      const stock = stocks.find(st => st.id === t.stock_id);
-      return s + toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD");
-    }, 0);
+  const currentYearContribs = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
+      const manualTotal = Object.values(stored[currentYear] || {})
+        .reduce((s, acct) => s + (parseFloat(acct.contributed) || 0), 0)
+      if (manualTotal > 0) return manualTotal
+    } catch {}
+    return transactions
+      .filter(t => t.type === "buy" && new Date(t.date).getFullYear() === currentYear)
+      .reduce((s, t) => {
+        const stock = stocks.find(st => st.id === t.stock_id);
+        return s + toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD");
+      }, 0);
+  })();
   const totalGain    = totalValue - totalCost;
   const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
   const thisYear = new Date().getFullYear();

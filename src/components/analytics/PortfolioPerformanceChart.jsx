@@ -118,15 +118,27 @@ export default function PortfolioPerformanceChart({
       return Math.max(0, shares)
     }
 
-    // Contributions in range (buy transactions)
+    // Contributions in range — prefer manually entered value from Settings
     let ytdContribs = 0
-    transactions.forEach(tx => {
-      const txDate = new Date(tx.date)
-      if (txDate >= startDate && txDate <= today && tx.type === "buy") {
-        const stock = stocks.find(s => s.id === tx.stock_id)
-        ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
-      }
-    })
+    if (range === "ytd") {
+      try {
+        const stored = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
+        const yr = today.getFullYear()
+        const manualTotal = Object.values(stored[yr] || {})
+          .reduce((s, acct) => s + (parseFloat(acct.contributed) || 0), 0)
+        if (manualTotal > 0) { ytdContribs = manualTotal }
+      } catch {}
+    }
+    if (ytdContribs === 0) {
+      // Fallback: calculate from transactions
+      transactions.forEach(tx => {
+        const txDate = new Date(tx.date)
+        if (txDate >= startDate && txDate <= today && tx.type === "buy") {
+          const stock = stocks.find(s => s.id === tx.stock_id)
+          ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
+        }
+      })
+    }
 
     // Build chart points
     const points = []
