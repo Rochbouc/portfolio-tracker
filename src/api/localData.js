@@ -1,5 +1,23 @@
-// localStorage-based data layer
-// Each entity has: list, create, update, delete, bulkCreate
+// Data layer: syncs to Firestore (cloud, cross-device) when signed in and
+// Firebase is configured, with localStorage as a fast local mirror + offline
+// fallback. If Firebase isn't set up yet, everything behaves exactly like
+// the old pure-localStorage version — nothing breaks for people who haven't
+// done the Firebase setup.
+//
+// Scope: this syncs the CORE portfolio data — stocks, transactions,
+// dividends, cash positions, cash contributions, account types, snapshots,
+// watchlist, price alerts. Device-local UI preferences (tab order, widget
+// layout, RRSP/TFSA contribution-room widget, cached FX rate, cached
+// dividend forecasts) are NOT synced — those stay per-device for now.
+import { db } from "./firebase"
+import {
+  collection, doc, getDocs, setDoc, deleteDoc, writeBatch,
+} from "firebase/firestore"
+
+let currentUid = null
+export function setSyncUser(uid) { currentUid = uid }
+export function getSyncUser() { return currentUid }
+function cloudReady() { return Boolean(db && currentUid) }
 
 function getAll(key) {
   try { return JSON.parse(localStorage.getItem(key) || "[]"); }
@@ -11,49 +29,91 @@ function saveAll(key, items) {
 function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
+function colRef(key) { return collection(db, "users", currentUid, key) }
+function docRef(key, id) { return doc(db, "users", currentUid, key, id) }
+
+// Fire-and-forget cloud write. Deliberately NOT awaited by callers — the
+// local mirror is the source of truth for what the UI shows instantly;
+// this just pushes the same data to Firestore in the background. If you're
+// offline, this silently fails/queues and the app keeps working normally
+// (Firestore's own persistence layer retries once you're back online).
+function cloudSet(key, id, data) {
+  if (!cloudReady()) return
+  setDoc(docRef(key, id), data).catch(() => {})
+}
+function cloudDelete(key, id) {
+  if (!cloudReady()) return
+  deleteDoc(docRef(key, id)).catch(() => {})
+}
+function cloudBatchSet(key, items) {
+  if (!cloudReady() || items.length === 0) return
+  const batch = writeBatch(db)
+  items.forEach(item => batch.set(docRef(key, item.id), item))
+  batch.commit().catch(() => {})
+}
+
+// Pulls the latest data for one collection from Firestore and refreshes the
+// local mirror. Falls back to the local mirror (silently) if offline or
+// Firestore isn't reachable — Firestore's own persistent cache usually
+// handles this already, this is just an extra safety net.
+async function fetchAndMirror(key) {
+  if (!cloudReady()) return getAll(key)
+  try {
+    const snap = await getDocs(colRef(key))
+    const items = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    saveAll(key, items)
+    return items
+  } catch {
+    return getAll(key)
+  }
+}
+
 function makeEntity(key) {
   return {
-    list: (filters = {}) => {
-      let items = getAll(key);
+    list: async (filters = {}) => {
+      let items = await fetchAndMirror(key);
       for (const [k, v] of Object.entries(filters)) {
         items = items.filter(i => i[k] === v);
       }
-      return Promise.resolve(items);
+      return items;
     },
-    get: (id) => {
-      const items = getAll(key);
-      return Promise.resolve(items.find(i => i.id === id) || null);
+    get: async (id) => {
+      const items = await fetchAndMirror(key);
+      return items.find(i => i.id === id) || null;
     },
-    create: (data) => {
-      const items = getAll(key);
+    create: async (data) => {
       const item = { ...data, id: genId(), created_date: new Date().toISOString() };
-      items.push(item);
-      saveAll(key, items);
-      return Promise.resolve(item);
+      const items = getAll(key); items.push(item); saveAll(key, items);
+      cloudSet(key, item.id, item);
+      return item;
     },
-    update: (id, data) => {
+    update: async (id, data) => {
       const items = getAll(key);
       const idx = items.findIndex(i => i.id === id);
-      if (idx === -1) return Promise.reject(new Error("Not found"));
+      if (idx === -1) throw new Error("Not found");
       items[idx] = { ...items[idx], ...data };
       saveAll(key, items);
-      return Promise.resolve(items[idx]);
+      cloudSet(key, id, items[idx]);
+      return items[idx];
     },
-    delete: (id) => {
+    delete: async (id) => {
       const items = getAll(key).filter(i => i.id !== id);
       saveAll(key, items);
-      return Promise.resolve(true);
+      cloudDelete(key, id);
+      return true;
     },
-    bulkCreate: (dataArray) => {
-      const items = getAll(key);
+    bulkCreate: async (dataArray) => {
       const created = dataArray.map(d => ({ ...d, id: genId(), created_date: new Date().toISOString() }));
+      const items = getAll(key);
       saveAll(key, [...items, ...created]);
-      return Promise.resolve(created);
+      cloudBatchSet(key, created);
+      return created;
     },
-    replaceAll: (dataArray) => {
+    replaceAll: async (dataArray) => {
       const items = dataArray.map(d => ({ ...d, id: d.id || genId() }));
       saveAll(key, items);
-      return Promise.resolve(items);
+      cloudBatchSet(key, items);
+      return items;
     },
   };
 }
@@ -66,19 +126,50 @@ export const PortfolioSnapshot = makeEntity("portfolioSnapshots");
 export const WatchlistItem = makeEntity("watchlist");
 export const PriceAlert = makeEntity("priceAlerts");
 
-// Export/import all data as JSON
+const SYNCED_KEYS = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions", "cashContributions"];
+
+// One-time migration: pushes whatever is currently in this browser's
+// localStorage up to Firestore. Use this once, right after setting up
+// Firebase, so your existing desktop data becomes available on other
+// devices too. Safe to run more than once (it just overwrites with the
+// same local data — it will NOT duplicate anything).
+export async function uploadLocalDataToCloud() {
+  if (!cloudReady()) throw new Error("Not signed in / Firebase not configured");
+  let totalDocs = 0;
+  for (const key of SYNCED_KEYS) {
+    const items = getAll(key);
+    if (items.length === 0) continue;
+    const batch = writeBatch(db);
+    items.forEach(item => {
+      const id = item.id || genId();
+      batch.set(docRef(key, id), { ...item, id });
+    });
+    await batch.commit();
+    totalDocs += items.length;
+  }
+  return totalDocs;
+}
+
+// Pulls everything down from Firestore into the local mirror. Called once
+// right after login so the app has fresh cloud data before you start using it.
+export async function downloadCloudDataToLocal() {
+  if (!cloudReady()) return;
+  for (const key of SYNCED_KEYS) {
+    await fetchAndMirror(key);
+  }
+}
+
+// Export/import all data as JSON (local mirror — used for manual backup file)
 export function exportAllData() {
-  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions", "cashContributions"];
   const data = {};
-  for (const key of keys) {
+  for (const key of SYNCED_KEYS) {
     data[key] = getAll(key);
   }
   return data;
 }
 
 export function importAllData(data) {
-  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions", "cashContributions"];
-  for (const key of keys) {
+  for (const key of SYNCED_KEYS) {
     if (data[key]) saveAll(key, data[key]);
   }
 }
@@ -92,53 +183,48 @@ export const CashPosition = makeEntity("cashPositions");
 // delta > 0 = add cash, delta < 0 = deduct cash
 export async function adjustCash(account_type, currency, delta) {
   const all = getAll("cashPositions");
-  const key = `${account_type}__${currency}`;
   const existing = all.find(c => c.account_type === account_type && c.currency === currency);
+  let updated;
   if (existing) {
     const newBalance = (existing.balance || 0) + delta;
-    const updated = { ...existing, balance: newBalance, updated_date: new Date().toISOString() };
+    updated = { ...existing, balance: newBalance, updated_date: new Date().toISOString() };
     saveAll("cashPositions", all.map(c => c.id === existing.id ? updated : c));
-    return updated;
   } else {
-    const item = {
-      id: genId(),
-      account_type,
-      currency,
-      balance: delta,
-      updated_date: new Date().toISOString(),
-      created_date: new Date().toISOString(),
+    updated = {
+      id: genId(), account_type, currency, balance: delta,
+      updated_date: new Date().toISOString(), created_date: new Date().toISOString(),
     };
-    saveAll("cashPositions", [...all, item]);
-    return item;
+    saveAll("cashPositions", [...all, updated]);
   }
+  cloudSet("cashPositions", updated.id, updated);
+  return updated;
 }
 
 // Helper: set cash balance directly (for manual entry)
 export async function setCash(account_type, currency, balance) {
   const all = getAll("cashPositions");
   const existing = all.find(c => c.account_type === account_type && c.currency === currency);
+  let updated;
   if (existing) {
-    const updated = { ...existing, balance: parseFloat(balance) || 0, updated_date: new Date().toISOString() };
+    updated = { ...existing, balance: parseFloat(balance) || 0, updated_date: new Date().toISOString() };
     saveAll("cashPositions", all.map(c => c.id === existing.id ? updated : c));
-    return updated;
   } else {
-    const item = {
-      id: genId(),
-      account_type,
-      currency,
-      balance: parseFloat(balance) || 0,
-      updated_date: new Date().toISOString(),
-      created_date: new Date().toISOString(),
+    updated = {
+      id: genId(), account_type, currency, balance: parseFloat(balance) || 0,
+      updated_date: new Date().toISOString(), created_date: new Date().toISOString(),
     };
-    saveAll("cashPositions", [...all, item]);
-    return item;
+    saveAll("cashPositions", [...all, updated]);
   }
+  cloudSet("cashPositions", updated.id, updated);
+  return updated;
 }
 
 // Helper: delete a cash position entirely
 export async function deleteCash(account_type, currency) {
   const all = getAll("cashPositions");
+  const existing = all.find(c => c.account_type === account_type && c.currency === currency);
   saveAll("cashPositions", all.filter(c => !(c.account_type === account_type && c.currency === currency)));
+  if (existing) cloudDelete("cashPositions", existing.id);
 }
 
 // ── Cash Contributions Log ─────────────────────────────────────────
@@ -162,6 +248,6 @@ export async function recordCashContribution(account_type, currency, amount) {
   };
   const all = getAll("cashContributions");
   saveAll("cashContributions", [...all, item]);
+  cloudSet("cashContributions", item.id, item);
   return item;
 }
-

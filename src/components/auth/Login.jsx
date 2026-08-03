@@ -1,16 +1,23 @@
 import { useState } from "react"
 import { Eye, EyeOff, Lock, TrendingUp } from "lucide-react"
+import { auth, firebaseConfigured } from "@/api/firebase"
+import { signInWithEmailAndPassword, signOut } from "firebase/auth"
 
-const CREDENTIALS = {
+// Fallback credentials, used ONLY if Firebase hasn't been set up yet (see
+// .env.example). Once Firebase is configured, real accounts are managed in
+// the Firebase Console → Authentication → Users, and this fallback is unused.
+const FALLBACK_CREDENTIALS = {
   email:    "boucher.roch@gmail.com",
   password: "Rb123polpma!",
 }
 const SESSION_KEY = "portfolio_auth_v1"
 
 export function isAuthenticated() {
+  if (firebaseConfigured) return false // real check happens via onAuthStateChanged in App.jsx
   try { return localStorage.getItem(SESSION_KEY) === "true" } catch { return false }
 }
 export function logout() {
+  if (firebaseConfigured && auth) { signOut(auth).catch(() => {}) }
   localStorage.removeItem(SESSION_KEY)
   window.location.reload()
 }
@@ -26,12 +33,23 @@ export default function Login({ onLogin }) {
     e.preventDefault()
     setError("")
     setLoading(true)
-    await new Promise(r => setTimeout(r, 600))
-    if (email.trim().toLowerCase() === CREDENTIALS.email && password === CREDENTIALS.password) {
-      localStorage.setItem(SESSION_KEY, "true")
-      onLogin()
-    } else {
-      setError("Invalid email or password.")
+    try {
+      if (firebaseConfigured) {
+        // Real cloud login — same credentials work on any device.
+        await signInWithEmailAndPassword(auth, email.trim(), password)
+        onLogin()
+      } else {
+        // Firebase not set up yet — fall back to the old local-only check.
+        await new Promise(r => setTimeout(r, 400))
+        if (email.trim().toLowerCase() === FALLBACK_CREDENTIALS.email && password === FALLBACK_CREDENTIALS.password) {
+          localStorage.setItem(SESSION_KEY, "true")
+          onLogin()
+        } else {
+          setError("Invalid email or password.")
+        }
+      }
+    } catch (err) {
+      setError(firebaseFriendlyError(err))
     }
     setLoading(false)
   }
@@ -45,6 +63,9 @@ export default function Login({ onLogin }) {
           </div>
           <h1 className="text-2xl font-bold text-white">Portfolio Tracker</h1>
           <p className="text-blue-300 text-sm mt-1">Sign in to your account</p>
+          {!firebaseConfigured && (
+            <p className="text-amber-400 text-xs mt-2">⚠ Cloud sync not configured — see .env.example</p>
+          )}
         </div>
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -85,4 +106,14 @@ export default function Login({ onLogin }) {
       </div>
     </div>
   )
+}
+
+function firebaseFriendlyError(err) {
+  const code = err?.code || ""
+  if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) {
+    return "Invalid email or password."
+  }
+  if (code.includes("too-many-requests")) return "Too many attempts — try again in a bit."
+  if (code.includes("network-request-failed")) return "Network error — check your connection."
+  return "Sign-in failed. " + (err?.message || "")
 }

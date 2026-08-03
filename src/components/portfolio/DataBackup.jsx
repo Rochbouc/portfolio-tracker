@@ -1,9 +1,26 @@
-import React, { useRef } from "react"
-import { exportAllData, importAllData } from "@/api/localData"
+import React, { useRef, useState } from "react"
+import { exportAllData, importAllData, uploadLocalDataToCloud, getSyncUser } from "@/api/localData"
+import { firebaseConfigured } from "@/api/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Download, Upload, AlertTriangle } from "lucide-react"
+import { Download, Upload, AlertTriangle, CloudUpload, Cloud } from "lucide-react"
 export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
+  const [cloudMsg, setCloudMsg] = useState("")
+  const [cloudBusy, setCloudBusy] = useState(false)
+  const cloudActive = firebaseConfigured && Boolean(getSyncUser())
+
+  async function handleUploadToCloud() {
+    if (!cloudActive) return
+    if (!confirm("Upload this browser's current data to the cloud?\n\nThis is meant for a ONE-TIME migration after setting up Firebase — it will overwrite cloud data for any items with matching IDs.")) return
+    setCloudBusy(true)
+    try {
+      const count = await uploadLocalDataToCloud()
+      setCloudMsg(`✓ Uploaded ${count} records to the cloud.`)
+    } catch (e) {
+      setCloudMsg("Error: " + e.message)
+    }
+    setCloudBusy(false)
+  }
   function exportStocks() {
     // Merge live prices into each stock record before exporting
     const enriched = stocks.map(s => ({
@@ -190,18 +207,30 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
       <Card>
         <CardHeader><CardTitle className="text-base">Backup and Restore</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">Your data is stored in your browser. Export a backup regularly.</p>
+          <p className="text-sm text-muted-foreground">
+            {cloudActive
+              ? <span className="inline-flex items-center gap-1.5 text-green-700"><Cloud className="h-4 w-4" /> Synced to the cloud — your data is available on any device you sign into.</span>
+              : firebaseConfigured
+                ? "Signed in, but cloud sync isn't active yet."
+                : "Your data is stored in your browser only. Export a backup regularly, or set up cloud sync (see .env.example)."}
+          </p>
           <div className="flex gap-3 flex-wrap">
             <Button onClick={handleExport} variant="outline" className="gap-2"><Download className="h-4 w-4" /> Export Backup</Button>
             <Button onClick={() => fileRef.current?.click()} variant="outline" className="gap-2"><Upload className="h-4 w-4" /> Restore Backup</Button>
             <Button onClick={exportStocks} variant="outline" className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50"><Download className="h-4 w-4" /> Export Stocks (for audit)</Button>
             <Button onClick={exportDividends} variant="outline" className="gap-2 text-green-600 border-green-200 hover:bg-green-50"><Download className="h-4 w-4" /> Export Dividends (for audit)</Button>
             <Button onClick={archiveYear} variant="outline" className="gap-2 text-purple-600 border-purple-200 hover:bg-purple-50"><Download className="h-4 w-4" /> Archive Year (End of Year)</Button>
+            {cloudActive && (
+              <Button onClick={handleUploadToCloud} disabled={cloudBusy} variant="outline" className="gap-2 text-sky-600 border-sky-200 hover:bg-sky-50">
+                <CloudUpload className="h-4 w-4" /> {cloudBusy ? "Uploading…" : "Upload This Device's Data to Cloud"}
+              </Button>
+            )}
             <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
           </div>
+          {cloudMsg && <p className="text-xs text-sky-700">{cloudMsg}</p>}
           <div className="flex items-start gap-2 text-xs text-amber-600 bg-amber-50 rounded-md p-3">
             <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <span>Restoring will replace all current data.</span>
+            <span>Restoring will replace all current data.{cloudActive && " (Use \"Upload to Cloud\" afterward if you want the cloud copy updated too.)"}</span>
           </div>
         </CardContent>
       </Card>
