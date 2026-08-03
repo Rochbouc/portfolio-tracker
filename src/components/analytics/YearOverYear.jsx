@@ -163,9 +163,15 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
   const allIndices = ["SP500","NASDAQ","TSX","DowJones","portfolio","withDiv"]
   const indexLabels = {SP500:"S&P 500",NASDAQ:"NASDAQ",TSX:"TSX",DowJones:"Dow Jones",portfolio:"Portfolio",withDiv:"Portfolio+Div"}
 
-  // Average performance excluding contributions
+  // Average performance excluding contributions — compounded (CAGR-style),
+  // not a simple arithmetic mean, since arithmetic averaging overstates the
+  // true average when yearly returns vary a lot (e.g. an early outlier year
+  // on a small base). The current live/incomplete year is still fully
+  // excluded, so its contribution never enters this calculation.
   const validPcts = fullData.filter(r => r.pctChange != null && !r.isLive).map(r => r.pctChange)
-  const avgPct = validPcts.length > 0 ? validPcts.reduce((s,v)=>s+v,0)/validPcts.length : null
+  const avgPct = validPcts.length > 0
+    ? (validPcts.reduce((prod, p) => prod * (1 + p / 100), 1) ** (1 / validPcts.length) - 1) * 100
+    : null
 
   return (
     <div className="space-y-4">
@@ -175,7 +181,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
         <Card className="bg-white p-4">
           <div className="text-xs text-gray-400 mb-1">Avg Annual Return</div>
           <div className={cn("text-xl font-bold", (avgPct||0)>=0?"text-green-600":"text-red-500")}>{fmtPct(avgPct)}</div>
-          <div className="text-xs text-gray-400">excl. contributions</div>
+          <div className="text-xs text-gray-400">CAGR, excl. contributions</div>
         </Card>
         <Card className="bg-white p-4">
           <div className="text-xs text-gray-400 mb-1">Live Market Value</div>
