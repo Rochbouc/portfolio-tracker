@@ -14,8 +14,9 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     const blob = new Blob([JSON.stringify(enriched, null, 2)], { type: "application/json" })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement("a")
-    a.href = url; a.download = "my_stocks.json"; a.click()
-    URL.revokeObjectURL(url)
+    a.href = url; a.download = "my_stocks.json"
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   function exportDividends() {
@@ -23,8 +24,9 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     const blob = new Blob([raw], { type: "application/json" })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement("a")
-    a.href = url; a.download = "my_dividends.json"; a.click()
-    URL.revokeObjectURL(url)
+    a.href = url; a.download = "my_dividends.json"
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   function archiveYear() {
@@ -132,8 +134,10 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     const a = document.createElement("a")
     a.href = url
     a.download = `portfolio-backup-${new Date().toISOString().slice(0,10)}.json`
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   const handleImport = (e) => {
     const file = e.target.files?.[0]
