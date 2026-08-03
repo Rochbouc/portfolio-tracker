@@ -264,7 +264,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
             <table className="w-full text-[11px]">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {["Year","Market Value","Invested","Cash Dep","% Change*","With Divs","Proj Div","Act Div","SP500","TSX"].map(h => (
+                  {["Year","Market Value","Invested","Cash Dep","% Change*","Proj Div","Act Div","SP500","TSX"].map(h => (
                     <th key={h} className="px-2 py-2 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>
                   ))}
                   <th className="px-2 py-2"></th>
@@ -282,7 +282,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
                             className="w-20 text-[11px] border border-blue-300 rounded px-1 py-0.5 focus:outline-none" />
                         </td>
                       ))}
-                      <td colSpan={4} />
+                      <td colSpan={3} />
                       <td className="px-2 py-1">
                         <div className="flex gap-1">
                           <button onClick={saveEdit} className="text-green-600 text-xs px-1.5 py-0.5 bg-green-100 rounded hover:bg-green-200">Save</button>
@@ -304,10 +304,6 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
                       <td className={cn("px-2 py-1.5 font-semibold",
                         row.pctChange==null?"text-gray-300":row.pctChange>=0?"text-green-600":"text-red-500")}>
                         {fmtPct(row.pctChange)}
-                      </td>
-                      <td className={cn("px-2 py-1.5 font-semibold",
-                        row.pctWithDiv==null?"text-gray-300":row.pctWithDiv>=0?"text-green-600":"text-red-500")}>
-                        {fmtPct(row.pctWithDiv)}
                       </td>
                       <td className="px-2 py-1.5 text-blue-600">{row.projDiv > 0 ? fmt(row.projDiv) : "—"}</td>
                       <td className="px-2 py-1.5 text-green-600">{row.actDiv > 0 ? fmt(row.actDiv) : "—"}</td>
