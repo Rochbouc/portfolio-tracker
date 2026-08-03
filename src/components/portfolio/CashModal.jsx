@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { setCash, adjustCash, recordCashContribution } from "@/api/localData"
+import { getRate } from "@/api/rateContext"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +12,32 @@ const BUILTIN_ACCOUNTS = ["RRSP","TFSA","FHSA","Cash","Margin","USD Cash"]
 const ACCOUNTS_KEY = "custom_account_types"
 function loadCustomAccounts() {
   try { return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "[]") } catch { return [] }
+}
+
+// Auto-updates the RRSP/TFSA contribution-room widget (Settings tab) whenever
+// cash is manually deposited or withdrawn from those accounts.
+// - TFSA room is tracked CUMULATIVELY (lifetime unused room carries forward,
+//   matching how TFSA room actually works) — stored flat as contribs.TFSA.
+// - RRSP room is tracked PER YEAR (this year's contribution vs. this year's
+//   limit) — stored under contribs[year].RRSP, same as before.
+function bumpContributionRoom(account, deltaCAD) {
+  if (account !== "RRSP" && account !== "TFSA") return
+  try {
+    const contribs = JSON.parse(localStorage.getItem("contribution_tracking") || "{}")
+    if (account === "TFSA") {
+      const cur = contribs.TFSA || {}
+      const contributed = (cur.contributed ?? 55756.68) + deltaCAD
+      const next = { ...contribs, TFSA: { room: cur.room ?? 109000, contributed } }
+      localStorage.setItem("contribution_tracking", JSON.stringify(next))
+    } else {
+      const year = new Date().getFullYear()
+      const yearData = contribs[year] || {}
+      const acctData = yearData.RRSP || {}
+      const contributed = (acctData.contributed || 0) + deltaCAD
+      const next = { ...contribs, [year]: { ...yearData, RRSP: { ...acctData, contributed } } }
+      localStorage.setItem("contribution_tracking", JSON.stringify(next))
+    }
+  } catch {}
 }
 
 export default function CashModal({ open, onOpenChange, onSaved, initialAccount, initialCurrency }) {
@@ -38,6 +65,8 @@ export default function CashModal({ open, onOpenChange, onSaved, initialAccount,
         const delta = mode === "add" ? val : -val
         await adjustCash(account, currency, delta)
         await recordCashContribution(account, currency, delta)
+        const deltaCAD = currency === "USD" ? delta * getRate() : delta
+        bumpContributionRoom(account, deltaCAD)
       }
       onSaved()
       onOpenChange(false)

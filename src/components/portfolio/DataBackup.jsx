@@ -154,6 +154,10 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     e.target.value = ""
   }
   // RRSP/TFSA contribution and room tracking
+  // TFSA room is CUMULATIVE (lifetime unused room carries forward — that's
+  // how TFSA room actually works), stored flat as contribs.TFSA.
+  // RRSP stays PER YEAR (this year's contribution vs. this year's limit).
+  // Both auto-update when cash is manually deposited/withdrawn via CashModal.
   const [contribs, setContribs] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem("contribution_tracking") || "{}") } catch { return {} }
   })
@@ -163,7 +167,15 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     const next = { ...contribs, [year]: { ...(contribs[year]||{}), [account]: { ...(contribs[year]?.[account]||{}), [field]: parseFloat(value)||0 } } }
     saveContribs(next)
   }
+  function updateTFSA(field, value) {
+    saveContribs({ ...contribs, TFSA: { ...(contribs.TFSA||{}), [field]: parseFloat(value)||0 } })
+  }
   const thisYear = contribs[year] || {}
+  // TFSA starting baseline: $109,000 lifetime room, $55,756.68 contributed to
+  // date (this year $30,910 + prior years $24,846.68), leaving $53,243.32.
+  const tfsaRoom = contribs.TFSA?.room ?? 109000
+  const tfsaContributed = contribs.TFSA?.contributed ?? 55756.68
+  const tfsaRemaining = tfsaRoom - tfsaContributed
 
   return (
     <Card>
@@ -179,15 +191,16 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
 
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {["RRSP","TFSA"].map(acct => {
-                const data = thisYear[acct] || {}
-                const room = contribs.room?.[acct] || (acct==="TFSA" ? 6500 : 18000)
+              {/* RRSP — per-year tracking, auto-updates on manual deposit/withdraw */}
+              {(() => {
+                const data = thisYear.RRSP || {}
+                const room = contribs.room?.RRSP || 18000
                 const contributed = data.contributed || 0
                 const remaining = room - contributed
                 return (
-                  <div key={acct} className="border rounded-lg p-3 bg-gray-50">
+                  <div className="border rounded-lg p-3 bg-gray-50">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-bold text-gray-700">{acct} {year}</span>
+                      <span className="text-sm font-bold text-gray-700">RRSP {year}</span>
                       <span className={`text-xs font-semibold ${remaining >= 0 ? "text-green-600" : "text-red-500"}`}>
                         {remaining >= 0 ? "Room: " : "Over by: "}C${Math.abs(remaining).toLocaleString()}
                       </span>
@@ -196,23 +209,53 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
                       <div className="flex items-center gap-2">
                         <label className="text-xs text-gray-500 w-28">Contribution Room</label>
                         <input type="number" value={room}
-                          onChange={e => saveContribs({...contribs, room:{...(contribs.room||{}), [acct]: parseFloat(e.target.value)||0}})}
+                          onChange={e => saveContribs({...contribs, room:{...(contribs.room||{}), RRSP: parseFloat(e.target.value)||0}})}
                           className="flex-1 text-xs border rounded px-2 py-1 text-right"/>
                       </div>
                       <div className="flex items-center gap-2">
                         <label className="text-xs text-gray-500 w-28">Contributed {year}</label>
                         <input type="number" value={contributed}
-                          onChange={e => updateContrib(acct,"contributed",e.target.value)}
+                          onChange={e => updateContrib("RRSP","contributed",e.target.value)}
                           className="flex-1 text-xs border rounded px-2 py-1 text-right"/>
                       </div>
                       <div className="h-1.5 bg-gray-200 rounded-full mt-1">
                         <div className={`h-1.5 rounded-full ${remaining >= 0 ? "bg-green-500" : "bg-red-500"}`}
                           style={{width:`${Math.min(100,(contributed/room)*100)}%`}}/>
                       </div>
+                      <p className="text-[10px] text-gray-400">Auto-adds when you deposit cash into RRSP. Resets each year.</p>
                     </div>
                   </div>
                 )
-              })}
+              })()}
+
+              {/* TFSA — cumulative lifetime room, auto-updates on manual deposit/withdraw */}
+              <div className="border rounded-lg p-3 bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-bold text-gray-700">TFSA (lifetime)</span>
+                  <span className={`text-xs font-semibold ${tfsaRemaining >= 0 ? "text-green-600" : "text-red-500"}`}>
+                    {tfsaRemaining >= 0 ? "Room: " : "Over by: "}C${Math.abs(tfsaRemaining).toLocaleString()}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-500 w-28">Total Room</label>
+                    <input type="number" value={tfsaRoom}
+                      onChange={e => updateTFSA("room", e.target.value)}
+                      className="flex-1 text-xs border rounded px-2 py-1 text-right"/>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-500 w-28">Contributed (total)</label>
+                    <input type="number" value={tfsaContributed}
+                      onChange={e => updateTFSA("contributed", e.target.value)}
+                      className="flex-1 text-xs border rounded px-2 py-1 text-right"/>
+                  </div>
+                  <div className="h-1.5 bg-gray-200 rounded-full mt-1">
+                    <div className={`h-1.5 rounded-full ${tfsaRemaining >= 0 ? "bg-green-500" : "bg-red-500"}`}
+                      style={{width:`${Math.min(100,(tfsaContributed/tfsaRoom)*100)}%`}}/>
+                  </div>
+                  <p className="text-[10px] text-gray-400">Auto-adds when you deposit cash into TFSA. Cumulative — doesn't reset yearly.</p>
+                </div>
+              </div>
             </div>
           </div>
 
