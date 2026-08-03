@@ -450,6 +450,22 @@ export default function ProjectionAt60({ stocks = [], prices = {}, totalValue = 
 
   const totalAt8 = combinedTotal[2]  // index 2 = 8%
 
+  // ── Current combined total — TODAY's value, no projection ────────
+  // Sum of each included account's latest known actual value right now
+  // (using the live portfolio price for Roch Personal instead of its last
+  // saved actual, same as the retirement projection does).
+  const currentTotal = useMemo(() => {
+    return settings.includedIds.reduce((sum, id) => {
+      const acct = accounts[id]
+      if (!acct) return sum
+      const actualKeys = Object.keys(acct.actuals || {}).map(Number).filter(n => !isNaN(n))
+      if (actualKeys.length === 0) return sum
+      const lastActAge = Math.max(...actualKeys)
+      const lastActVal = (id === "roch" && livePersonal > 0) ? livePersonal : (acct.actuals[lastActAge] || 0)
+      return sum + lastActVal
+    }, 0)
+  }, [accounts, settings.includedIds, livePersonal])
+
   const allIds     = Object.keys(accounts)
   const activeSections = [
     ...allIds.map(id => ({ id, label: accounts[id].label })),
@@ -477,7 +493,7 @@ export default function ProjectionAt60({ stocks = [], prices = {}, totalValue = 
     <div className="space-y-4">
 
       {/* Header cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {/* Retirement Goal — dollar amount only */}
         <Card className="bg-gradient-to-br from-blue-600 to-blue-800 text-white p-4">
           <div className="flex items-center gap-2 mb-1"><Target className="h-4 w-4" /><span className="text-[11px] opacity-80">Retirement Goal</span></div>
@@ -485,6 +501,28 @@ export default function ProjectionAt60({ stocks = [], prices = {}, totalValue = 
             <InlineNumber value={settings.retireGoal} onSave={v => updateSetting("retireGoal", v)} prefix="$" dark={true} />
           </div>
           <div className="text-[11px] opacity-60 mt-1">Click amount to edit</div>
+        </Card>
+
+        {/* Current combined total — sum of all accounts TODAY, no projection */}
+        <Card className="bg-white p-4">
+          <div className="text-[11px] text-gray-400 mb-1">Total of All Accounts (Today)</div>
+          <div className="text-xl font-bold text-gray-900">{fmtM(currentTotal)}</div>
+          <div className="mt-2 space-y-0.5 border-t border-gray-100 pt-1.5">
+            {settings.includedIds.map(id => {
+              const acct = accounts[id]
+              if (!acct) return null
+              const actualKeys = Object.keys(acct.actuals || {}).map(Number).filter(n => !isNaN(n))
+              if (actualKeys.length === 0) return null
+              const lastActAge = Math.max(...actualKeys)
+              const lastActVal = (id === "roch" && livePersonal > 0) ? livePersonal : acct.actuals[lastActAge]
+              return (
+                <div key={id} className="flex justify-between text-[10px]">
+                  <span className="text-gray-400 truncate max-w-[60%]">{acct.label.split(" ").slice(0,2).join(" ")}</span>
+                  <span className="font-medium text-gray-700">{fmtM(lastActVal)}</span>
+                </div>
+              )
+            })}
+          </div>
         </Card>
 
         {/* Combined total — with per-account breakdown */}
