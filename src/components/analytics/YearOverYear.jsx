@@ -53,7 +53,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
   const [history, setHistory] = useState(() => load() || PORTFOLIO_HISTORY_DEFAULTS.map(r => ({...r})))
   const [editingRow, setEditingRow] = useState(null)
   const [editDraft,  setEditDraft]  = useState({})
-  const [activeIndices, setActiveIndices] = useState(new Set(["SP500","TSX","portfolio","withDiv"]))
+  const [activeIndices, setActiveIndices] = useState(new Set(["SP500","TSX","portfolio"]))
 
   // Compute live current year
   const currentYear = new Date().getFullYear()
@@ -170,8 +170,8 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
     save(updated); setHistory(updated); setEditingRow(newRow.year); setEditDraft(newRow)
   }
 
-  const allIndices = ["SP500","NASDAQ","TSX","DowJones","Russell2000","portfolio","withDiv"]
-  const indexLabels = {SP500:"S&P 500",NASDAQ:"NASDAQ",TSX:"TSX",DowJones:"Dow Jones",Russell2000:"Russell 2000",portfolio:"Portfolio",withDiv:"Portfolio+Div"}
+  const allIndices = ["SP500","NASDAQ","TSX","DowJones","Russell2000","portfolio"]
+  const indexLabels = {SP500:"S&P 500",NASDAQ:"NASDAQ",TSX:"TSX",DowJones:"Dow Jones",Russell2000:"Russell 2000",portfolio:"Portfolio"}
 
   // Average performance excluding contributions — compounded (CAGR-style),
   // not a simple arithmetic mean, since arithmetic averaging overstates the
@@ -324,23 +324,23 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
                       <td className="px-2 py-1.5 text-blue-600">{row.projDiv > 0 ? fmt(row.projDiv) : "—"}</td>
                       <td className="px-2 py-1.5 text-green-600">{row.actDiv > 0 ? fmt(row.actDiv) : "—"}</td>
                       <td className={cn("px-2 py-1.5 text-[10px]",
-                        row.idxChanges?.SP500==null?"text-gray-300":row.idxChanges.SP500>=0?"text-blue-600":"text-red-400")}>
+                        row.idxChanges?.SP500==null?"text-gray-300":row.idxChanges.SP500>=0?"text-green-600":"text-red-500")}>
                         {row.idxChanges?.SP500 != null ? fmtPct(row.idxChanges.SP500) : "—"}
                       </td>
                       <td className={cn("px-2 py-1.5 text-[10px]",
-                        row.idxChanges?.TSX==null?"text-gray-300":row.idxChanges.TSX>=0?"text-green-600":"text-red-400")}>
+                        row.idxChanges?.TSX==null?"text-gray-300":row.idxChanges.TSX>=0?"text-green-600":"text-red-500")}>
                         {row.idxChanges?.TSX != null ? fmtPct(row.idxChanges.TSX) : "—"}
                       </td>
                       <td className={cn("px-2 py-1.5 text-[10px]",
-                        row.idxChanges?.NASDAQ==null?"text-gray-300":row.idxChanges.NASDAQ>=0?"text-purple-600":"text-red-400")}>
+                        row.idxChanges?.NASDAQ==null?"text-gray-300":row.idxChanges.NASDAQ>=0?"text-green-600":"text-red-500")}>
                         {row.idxChanges?.NASDAQ != null ? fmtPct(row.idxChanges.NASDAQ) : "—"}
                       </td>
                       <td className={cn("px-2 py-1.5 text-[10px]",
-                        row.idxChanges?.DowJones==null?"text-gray-300":row.idxChanges.DowJones>=0?"text-amber-600":"text-red-400")}>
+                        row.idxChanges?.DowJones==null?"text-gray-300":row.idxChanges.DowJones>=0?"text-green-600":"text-red-500")}>
                         {row.idxChanges?.DowJones != null ? fmtPct(row.idxChanges.DowJones) : "—"}
                       </td>
                       <td className={cn("px-2 py-1.5 text-[10px]",
-                        row.idxChanges?.Russell2000==null?"text-gray-300":row.idxChanges.Russell2000>=0?"text-pink-600":"text-red-400")}>
+                        row.idxChanges?.Russell2000==null?"text-gray-300":row.idxChanges.Russell2000>=0?"text-green-600":"text-red-500")}>
                         {row.idxChanges?.Russell2000 != null ? fmtPct(row.idxChanges.Russell2000) : "—"}
                       </td>
                       <td className="px-2 py-1.5 text-gray-300 text-[10px]">✎</td>
