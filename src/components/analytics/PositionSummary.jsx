@@ -16,7 +16,7 @@ function fmtPct(n) {
 }
 function toCAD(amt, cur) { return cur==="USD" ? amt * getRate() : amt }
 
-export default function PositionSummary({ stocks=[], prices={}, dividends=[], globalCurrency="CAD", totalDividendsReceived=null }) {
+export default function PositionSummary({ stocks=[], prices={}, dividends=[], globalCurrency="CAD", totalDividendsReceived=null, totalValue=null, totalCost=null, totalGain=null, totalGainPct=null }) {
   const USD_CAD = getRate()
 
   const [collapsed, setCollapsed] = useState({})
@@ -137,8 +137,22 @@ export default function PositionSummary({ stocks=[], prices={}, dividends=[], gl
       ytdGain  += d.gainCAD    // simplified — full gain shown
       ytdGainWDiv += d.ytdGainWithDiv
     })
-    return { cost, mkt, gain, gainWDiv, ytdGain, ytdGainWDiv, gainPct:cost>0?(gain/cost)*100:0, gainWDivPct:cost>0?(gainWDiv/cost)*100:0 }
+    return {
+      cost, mkt, gain, gainWDiv, ytdGain, ytdGainWDiv,
+      gainPct:cost>0?(gain/cost)*100:0, gainWDivPct:cost>0?(gainWDiv/cost)*100:0,
+    }
   }, [stocks, prices, dividends, displayCur])
+
+  // The grand summary banner uses the SAME live totals shown in the top-level
+  // dashboard cards (passed down from Dashboard.jsx) rather than recomputing
+  // them a second way here — the two calculations could drift apart by a few
+  // dollars from rounding/order-of-operations differences. Per-account/
+  // per-stock breakdowns below still use the locally computed values, since
+  // Dashboard.jsx doesn't have a per-account breakdown to pass down.
+  const bannerCost = totalCost  ?? grandTotals.cost
+  const bannerMkt  = totalValue ?? grandTotals.mkt
+  const bannerGain = totalGain  ?? grandTotals.gain
+  const bannerGainPct = totalGainPct ?? grandTotals.gainPct
 
   return (
     <div className="space-y-4">
@@ -149,22 +163,16 @@ export default function PositionSummary({ stocks=[], prices={}, dividends=[], gl
           <div className="flex flex-wrap gap-6 items-center">
             <div>
               <div className="text-slate-400 text-xs">Total Invested</div>
-              <div className="text-xl font-bold">{fmt(grandTotals.cost, displayCur)}</div>
+              <div className="text-xl font-bold">{fmt(bannerCost, displayCur)}</div>
             </div>
             <div>
               <div className="text-slate-400 text-xs">Market Value</div>
-              <div className="text-xl font-bold">{fmt(grandTotals.mkt, displayCur)}</div>
+              <div className="text-xl font-bold">{fmt(bannerMkt, displayCur)}</div>
             </div>
             <div>
               <div className="text-slate-400 text-xs">Total Return</div>
-              <div className={cn("text-xl font-bold", grandTotals.gain>=0?"text-green-400":"text-red-400")}>
-                {fmt(grandTotals.gain,displayCur)} ({fmtPct(grandTotals.gainPct)})
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-400 text-xs">Total Return + Dividends</div>
-              <div className={cn("text-xl font-bold", grandTotals.gainWDiv>=0?"text-green-300":"text-red-400")}>
-                {fmt(grandTotals.gainWDiv,displayCur)} ({fmtPct(grandTotals.cost>0?grandTotals.gainWDiv/grandTotals.cost*100:0)})
+              <div className={cn("text-xl font-bold", bannerGain>=0?"text-green-400":"text-red-400")}>
+                {fmt(bannerGain,displayCur)} ({fmtPct(bannerGainPct)})
               </div>
             </div>
             <div>

@@ -1662,6 +1662,10 @@ function DashboardInner() {
                       dividends={dividends}
                       globalCurrency={globalCurrency}
                       totalDividendsReceived={totalDividendsReceived}
+                      totalValue={totalValue}
+                      totalCost={totalCost}
+                      totalGain={totalGain}
+                      totalGainPct={totalGainPct}
                     />
                   </div>
                 )}
