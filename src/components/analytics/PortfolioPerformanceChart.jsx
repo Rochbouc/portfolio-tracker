@@ -159,7 +159,6 @@ export default function PortfolioPerformanceChart({
     datePts.forEach(dt => {
       let total = 0
       const acctVals = {}
-      const isToday = dt >= today
       // For Jan 1 of current year, use the prior year's actual market value from YoY history
       const isJan1 = dt.getMonth() === 0 && dt.getDate() === 1 && dt.getFullYear() === yr
       if (isJan1 && yoyHistory.length) {
@@ -174,9 +173,11 @@ export default function PortfolioPerformanceChart({
       stocks.forEach(s => {
         const sh = sharesAtDate(s.id, dt)
         if (sh <= 0) return
-        const p = isToday
-          ? (prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0)
-          : (s.avg_cost ?? 0)
+        // Always use live price (not avg_cost) — historical points approximate
+        // value as (shares held on that date × today's live price). We don't
+        // have true historical daily prices, but using avg_cost here crashes
+        // the line down to cost basis for every point except Jan 1 and today.
+        const p = prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0
         const val = toDisplay(p * sh, s.currency || "USD")
         total += val
         const acct = s.account_type || "Other"
