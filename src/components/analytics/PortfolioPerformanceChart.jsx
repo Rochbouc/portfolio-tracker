@@ -164,8 +164,22 @@ export default function PortfolioPerformanceChart({
       if (isJan1 && yoyHistory.length) {
         const prevRow = yoyHistory.find(r => String(r.year) === String(yr - 1))
         if (prevRow?.marketValue > 0) {
+          // Compute the account breakdown the normal way (shares held × live
+          // price) so RRSP/TFSA/Margin lines stay continuous, but override
+          // just the Total Portfolio number with the accurate YoY year-end
+          // value. Previously this zeroed every account line here, which
+          // is what caused the crash-to-$0 dip right at Jan 1.
+          const acctValsJan1 = {}
+          stocks.forEach(s => {
+            const sh = sharesAtDate(s.id, dt)
+            if (sh <= 0) return
+            const p = prices[s.symbol]?.price ?? s.current_price ?? s.avg_cost ?? 0
+            const val = toDisplay(p * sh, s.currency || "USD")
+            const acct = s.account_type || "Other"
+            acctValsJan1[acct] = (acctValsJan1[acct] || 0) + val
+          })
           const pt2 = { date: dt.toLocaleDateString("en-CA", {month:"short", day:"numeric"}), "Total Portfolio": Math.round(prevRow.marketValue) }
-          accts.forEach(a => { pt2[a] = 0 })
+          accts.forEach(a => { pt2[a] = Math.round(acctValsJan1[a] || 0) })
           points.push(pt2)
           return
         }
