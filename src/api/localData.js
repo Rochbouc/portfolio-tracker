@@ -68,7 +68,7 @@ export const PriceAlert = makeEntity("priceAlerts");
 
 // Export/import all data as JSON
 export function exportAllData() {
-  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions"];
+  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions", "cashContributions"];
   const data = {};
   for (const key of keys) {
     data[key] = getAll(key);
@@ -77,7 +77,7 @@ export function exportAllData() {
 }
 
 export function importAllData(data) {
-  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions"];
+  const keys = ["stocks", "transactions", "dividends", "accountTypes", "portfolioSnapshots", "watchlist", "priceAlerts", "cashPositions", "cashContributions"];
   for (const key of keys) {
     if (data[key]) saveAll(key, data[key]);
   }
@@ -139,5 +139,29 @@ export async function setCash(account_type, currency, balance) {
 export async function deleteCash(account_type, currency) {
   const all = getAll("cashPositions");
   saveAll("cashPositions", all.filter(c => !(c.account_type === account_type && c.currency === currency)));
+}
+
+// ── Cash Contributions Log ─────────────────────────────────────────
+// Records ONLY manual "Deposit"/"Withdraw" actions from CashModal — i.e.
+// actual new money moved in or out of the accounts. Buy/sell transactions
+// and dividend cash credits move cash too (via adjustCash) but must NOT be
+// logged here, since they aren't new contributions — they're money already
+// inside the portfolio moving around.
+// { id, date (YYYY-MM-DD), account_type, currency, amount } — amount is
+// signed: positive = deposit, negative = withdrawal.
+export const CashContribution = makeEntity("cashContributions");
+
+export async function recordCashContribution(account_type, currency, amount) {
+  const item = {
+    id: genId(),
+    account_type,
+    currency,
+    amount,
+    date: new Date().toISOString().slice(0, 10),
+    created_date: new Date().toISOString(),
+  };
+  const all = getAll("cashContributions");
+  saveAll("cashContributions", [...all, item]);
+  return item;
 }
 

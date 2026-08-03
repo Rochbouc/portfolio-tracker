@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
+import { getYearContributions } from "@/lib/contributions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { TrendingUp, TrendingDown } from "lucide-react"
@@ -38,7 +39,7 @@ function fmtPct(n) { if (n == null) return "—"; return (n>=0?"+":"")+n.toFixed
 
 const COLORS = {SP500:"#3b82f6",NASDAQ:"#8b5cf6",TSX:"#10b981",DowJones:"#f59e0b",portfolio:"#1d4ed8",withDiv:"#16a34a"}
 
-export default function YearOverYearPerformance({ stocks=[], transactions=[], dividends=[], prices={}, totalValue=null, totalDividendsReceived=null, estAnnualDividends=null }) {
+export default function YearOverYearPerformance({ stocks=[], transactions=[], cashContributions=[], dividends=[], prices={}, totalValue=null, totalDividendsReceived=null, estAnnualDividends=null }) {
   const [history, setHistory] = useState(() => load() || PORTFOLIO_HISTORY_DEFAULTS.map(r => ({...r})))
   const [editingRow, setEditingRow] = useState(null)
   const [editDraft,  setEditDraft]  = useState({})
@@ -58,21 +59,12 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], di
     return s + (st.currency==="USD" ? val * USD_CAD : val)
   }, 0)
 
-  // Current year contributions from transactions (CAD)
-  // Contributions = $23,520 known as of 2026-07-28 + any new buys after that
-  const currentYearContrib = (() => {
-    const cutoff = new Date("2026-07-28")
-    let total = 23520
-    transactions.forEach(t => {
-      const txDate = new Date(t.date)
-      if (t.type==="buy" && txDate > cutoff && t.date?.slice(0,4) === String(currentYear)) {
-        const stock = stocks.find(st=>st.id===t.stock_id)
-        const val = (t.shares||0) * (t.price||0)
-        total += stock?.currency==="USD" ? val * USD_CAD : val
-      }
-    })
-    return total
-  })()
+  // Current year contributions (CAD) — ONLY manual cash Deposit/Withdraw
+  // entries, never buy/sell transactions or dividends. See
+  // src/lib/contributions.js (shared with Dashboard.jsx and
+  // PortfolioPerformanceChart.jsx).
+  const toCAD = (amount, currency) => currency === "USD" ? amount * USD_CAD : amount
+  const currentYearContrib = getYearContributions(cashContributions, toCAD, currentYear)
 
   // Current year dividends in CAD (same as main page)
   const currentYearDivs = dividends

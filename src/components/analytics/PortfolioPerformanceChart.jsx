@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
+import { getYearContributions } from "@/lib/contributions"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts"
 import { TrendingUp } from "lucide-react"
@@ -37,7 +38,7 @@ function CustomTooltip({ active, payload, label, currency }) {
 }
 
 export default function PortfolioPerformanceChart({
-  stocks = [], prices = {}, transactions = [], globalCurrency = "CAD",
+  stocks = [], prices = {}, transactions = [], cashContributions = [], globalCurrency = "CAD",
   totalGain: passedGain, totalValue: passedValue, totalCost: passedCost
 }) {
   const [range, setRange] = useState("ytd")
@@ -118,27 +119,18 @@ export default function PortfolioPerformanceChart({
       return Math.max(0, shares)
     }
 
-    // Contributions = $23,520 known as of 2026-07-28 + any new buys after that date
+    // Contributions: ONLY manual cash Deposit/Withdraw entries (never buy/sell
+    // transactions or dividends). See src/lib/contributions.js for the single
+    // source of truth (shared with Dashboard.jsx and YearOverYear.jsx).
     let ytdContribs = 0
     if (range === "ytd") {
-      const cutoff = new Date("2026-07-28")
-      // Base amount known as of cutoff
-      ytdContribs = 23520
-      // Add any new buy transactions after the cutoff date
-      transactions.forEach(tx => {
-        const txDate = new Date(tx.date)
-        if (txDate > cutoff && txDate <= today && tx.type === "buy") {
-          const stock = stocks.find(s => s.id === tx.stock_id)
-          ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
-        }
-      })
+      ytdContribs = getYearContributions(cashContributions, toDisplay, yr)
     } else {
-      // For other ranges, calculate all from transactions
-      transactions.forEach(tx => {
-        const txDate = new Date(tx.date)
-        if (txDate >= startDate && txDate <= today && tx.type === "buy") {
-          const stock = stocks.find(s => s.id === tx.stock_id)
-          ytdContribs += toDisplay(tx.price * tx.shares, stock?.currency || "USD")
+      // For other ranges (1y/2y/3y/5y/all), sum logged contributions from the range start date
+      cashContributions.forEach(c => {
+        const cDate = new Date(c.date)
+        if (cDate >= startDate && cDate <= today) {
+          ytdContribs += toDisplay(c.amount || 0, c.currency || "CAD")
         }
       })
     }

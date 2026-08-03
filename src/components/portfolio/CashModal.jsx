@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { setCash } from "@/api/localData"
+import { setCash, adjustCash, recordCashContribution } from "@/api/localData"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,10 +31,13 @@ export default function CashModal({ open, onOpenChange, onSaved, initialAccount,
     setSaving(true)
     try {
       if (mode === "set") {
+        // "Set Balance" is a correction/sync, not a new deposit — not logged as a contribution.
         await setCash(account, currency, val)
       } else {
-        const { adjustCash } = await import("@/api/localData")
-        await adjustCash(account, currency, mode === "add" ? val : -val)
+        // "Deposit"/"Withdraw" is real new money moving in or out — log it as a contribution.
+        const delta = mode === "add" ? val : -val
+        await adjustCash(account, currency, delta)
+        await recordCashContribution(account, currency, delta)
       }
       onSaved()
       onOpenChange(false)

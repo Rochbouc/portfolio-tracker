@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getRate } from "@/api/rateContext"
-import { Stock, Transaction, Dividend, CashPosition, adjustCash, setCash, deleteCash } from "@/api/localData";
+import { getYearContributions } from "@/lib/contributions"
+import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash } from "@/api/localData";
 import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
 import { getPaySchedule } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
@@ -900,13 +901,14 @@ function DashboardInner() {
 
   function handleReorderTabs(newOrder) { setTabOrder(newOrder); localStorage.setItem("tab_order", JSON.stringify(newOrder)); }
   const [cashPositions, setCashPositions] = useState([]);
+  const [cashContributions, setCashContributions] = useState([]);
   const [globalCurrency, setGlobalCurrency] = useState("CAD");
   const [showCashModal, setShowCashModal] = useState(false);
   const [cashModalAccount, setCashModalAccount] = useState("");
   const [cashModalCurrency, setCashModalCurrency] = useState("CAD");
 
   const loadAll = useCallback(async () => {
-    const [s, t, d, cp] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list()]);
+    const [s, t, d, cp, cc] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list(), CashContribution.list()]);
     // Force-correct currency on all dividend records using stock as source of truth
     const fixed = d.map(div => {
       if (!div.stock_id) return div;  // cash entries keep their stored currency
@@ -922,7 +924,7 @@ function DashboardInner() {
     if (toFix.length > 0) {
       await Promise.all(toFix.map(div => Dividend.update(div.id, div).catch(() => {})));
     }
-    setStocks(s); setTransactions(t); setDividends(fixed); setCashPositions(cp);
+    setStocks(s); setTransactions(t); setDividends(fixed); setCashPositions(cp); setCashContributions(cc);
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -988,19 +990,10 @@ function DashboardInner() {
 
   // Total gain excludes current-year contributions
   const currentYear = new Date().getFullYear();
-  // $23,520 known as of 2026-07-28 + any new buys after that date
-  const currentYearContribs = (() => {
-    const cutoff = new Date("2026-07-28")
-    let total = 23520
-    transactions.forEach(t => {
-      const txDate = new Date(t.date)
-      if (t.type === "buy" && txDate > cutoff && txDate.getFullYear() === currentYear) {
-        const stock = stocks.find(st => st.id === t.stock_id)
-        total += toGlobalCurrency((t.shares * t.price) || 0, stock?.currency || "USD")
-      }
-    })
-    return total
-  })();
+  // Reconciled base as of a checkpoint date + new buys since, resets to $0
+  // every Jan 1. See src/lib/contributions.js (shared with
+  // PortfolioPerformanceChart.jsx and YearOverYear.jsx).
+  const currentYearContribs = getYearContributions(cashContributions, toGlobalCurrency, currentYear);
   const totalGain    = totalValue - totalCost;
   const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0;
   const thisYear = new Date().getFullYear();
@@ -1314,7 +1307,7 @@ function DashboardInner() {
 
       <div className="max-w-screen-xl mx-auto px-4 py-4">
         <Widget id="perf_chart" tabId="main" title="Portfolio Performance" defaultSize="full">
-          <PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />
+          <PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} cashContributions={cashContributions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} />
         </Widget>
 
         {/* Stats cards — each individually resizable/removable */}
@@ -1719,7 +1712,7 @@ function DashboardInner() {
                     const colors   = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#84cc16","#f97316","#ec4899","#6b7280"];
                     return (
                     <div className="space-y-4">
-                      <WidgetErrorBoundary title="Portfolio Performance"><PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} /></WidgetErrorBoundary>
+                      <WidgetErrorBoundary title="Portfolio Performance"><PortfolioPerformanceChart stocks={stocks} prices={prices} transactions={transactions} cashContributions={cashContributions} globalCurrency={globalCurrency} totalGain={totalGain} totalValue={totalValue} totalCost={totalCost} /></WidgetErrorBoundary>
                       <div className="flex flex-wrap gap-4">
                         <div className="flex-1 min-w-[300px]">
                           <WidgetErrorBoundary title="Sector Allocation">
@@ -1757,7 +1750,7 @@ function DashboardInner() {
                       <div className="flex flex-wrap gap-4">
                         <div className="flex-1 min-w-[300px]"><WidgetErrorBoundary title="Dividend Charts"><DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} /></WidgetErrorBoundary></div>
                       </div>
-                      <WidgetErrorBoundary title="Year over Year"><YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
+                      <WidgetErrorBoundary title="Year over Year"><YearOverYear stocks={stocks} transactions={transactions} cashContributions={cashContributions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
                       <WidgetErrorBoundary title="Account Summary"><AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
                     </div>
                   )})()
@@ -1786,7 +1779,7 @@ function DashboardInner() {
 
                 {/* YEAR OVER YEAR */}
                 {activeTab === "yoy" && (
-                  <YearOverYear stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} />
+                  <YearOverYear stocks={stocks} transactions={transactions} cashContributions={cashContributions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} />
                 )}
 
                 {/* DIVIDEND HISTORY */}
