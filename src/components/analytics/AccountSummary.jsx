@@ -201,8 +201,6 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
           { label:"Total Gain/Loss",        value:`${liveGainCAD>=0?"+":""}${fmt(liveGainCAD)} (${pct(liveGainPct)})`,
             icon:liveGainCAD>=0?<TrendingUp className="h-4 w-4 text-green-500"/>:<TrendingDown className="h-4 w-4 text-red-500"/>,
             color:liveGainCAD>=0?"text-green-700":"text-red-600" },
-          { label:"Total with Dividends",   value:`${liveGainWithDiv>=0?"+":""}${fmt(liveGainWithDiv)} (${pct(liveGainWithDivPct)})`,
-            icon:<PiggyBank className="h-4 w-4 text-purple-500"/>, color:liveGainWithDiv>=0?"text-green-700":"text-red-600" },
         ].map(c=>(
           <Card key={c.label} className="bg-white p-4">
             <div className="flex items-center gap-2 mb-1">{c.icon}<span className="text-xs text-gray-500">{c.label}</span></div>
@@ -210,121 +208,6 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
           </Card>
         ))}
       </div>
-
-      {/* Portfolio vs Market Index % Return */}
-      <Card className="bg-white">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardTitle className="text-sm">Annual % Return — Portfolio vs Market Indices (excl. contributions)</CardTitle>
-            <div className="flex flex-wrap gap-1.5">
-              {INDICES.map(k=>(
-                <button key={k} onClick={()=>toggleLine(k)}
-                  className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium transition-all",
-                    activeLines.has(k)?"text-white border-transparent":"text-gray-400 border-gray-200 bg-white")}
-                  style={activeLines.has(k)?{background:COLORS[k]}:{}}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={chartData} margin={{top:4,right:8,left:0,bottom:0}}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false}/>
-              <XAxis dataKey="year" tick={{fontSize:10}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontSize:10}} axisLine={false} tickLine={false} width={42}
-                tickFormatter={v=>v+"%"}/>
-              <Tooltip formatter={(v,name)=>[v!=null?v.toFixed(2)+"%":"—",name]}/>
-              {[...activeLines].map(k=>(
-                <Line key={k} type="monotone" dataKey={k}
-                  stroke={COLORS[k]} strokeWidth={k.startsWith("Portfolio")?2.5:1.5}
-                  strokeDasharray={k.startsWith("Portfolio")?"none":"4 2"}
-                  dot={k.startsWith("Portfolio")?{r:3}:false} connectNulls/>
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-          <div className="text-[10px] text-gray-400 mt-1 text-center">
-            Portfolio % return = (Market Value − Cash Deposited − Prior Year Value) ÷ Prior Year Value · All values in CAD
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Portfolio History Table */}
-      <Card className="bg-white">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-blue-500"/> Portfolio History (CAD)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  {["Year","Market Value","Cash Dep.","% Change*","Dividends","vs SP500","vs TSX"].map(h=>(
-                    <th key={h} className="px-3 py-2 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {histWithChange.map(row => {
-                  const idxRow  = INDEX_HISTORY.find(r => r.year === String(row.year))
-                  const prevIdx = INDEX_HISTORY.find(r => r.year === String(parseInt(row.year)-1))
-                  const sp500Pct = idxRow&&prevIdx ? ((idxRow.SP500-prevIdx.SP500)/prevIdx.SP500*100) : null
-                  const tsxPct   = idxRow&&prevIdx ? ((idxRow.TSX-prevIdx.TSX)/prevIdx.TSX*100)       : null
-                  const isEditing = editingRow === row.year
-                  const isLive    = row.isLive
-
-                  return (
-                    <tr key={row.year} className={cn("hover:bg-gray-50", isLive && "bg-blue-50 font-semibold border-t-2 border-blue-200")}>
-                      <td className="px-3 py-2 font-semibold text-gray-800">
-                        {String(row.year)}
-                        {isLive && <span className="ml-1 text-[10px] font-normal text-blue-400 bg-blue-100 px-1 py-0.5 rounded">live</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        {isLive ? <span className="text-blue-700">{fmt(row.marketValue)}</span>
-                         : isEditing ? <input type="number" value={editDraft.marketValue} onChange={e=>setEditDraft(p=>({...p,marketValue:e.target.value}))} className="w-24 text-xs border rounded px-1 py-0.5 text-right"/>
-                         : (row.marketValue>0 ? fmt(row.marketValue) : "—")}
-                      </td>
-                      <td className="px-3 py-2 text-gray-500">
-                        {isEditing ? <input type="number" value={editDraft.cashDep} onChange={e=>setEditDraft(p=>({...p,cashDep:e.target.value}))} className="w-20 text-xs border rounded px-1 py-0.5 text-right"/>
-                         : (row.cashDep>0 ? fmt(row.cashDep) : "—")}
-                      </td>
-                      <td className={cn("px-3 py-2 font-medium", row.changePct==null?"":row.changePct>=0?"text-green-600":"text-red-500")}>
-                        {row.changePct!=null ? pct(row.changePct) : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-green-600">
-                        {isLive ? fmt(row.actDiv)
-                         : isEditing ? <input type="number" value={editDraft.actDiv} onChange={e=>setEditDraft(p=>({...p,actDiv:e.target.value}))} className="w-20 text-xs border rounded px-1 py-0.5 text-right"/>
-                         : (row.actDiv>0 ? fmt(row.actDiv) : "—")}
-                      </td>
-                      <td className={cn("px-3 py-2 text-xs", sp500Pct==null?"text-gray-300":sp500Pct>=0?"text-blue-600":"text-red-400")}>
-                        {sp500Pct!=null ? pct(sp500Pct) : "—"}
-                      </td>
-                      <td className={cn("px-3 py-2 text-xs", tsxPct==null?"text-gray-300":tsxPct>=0?"text-red-600":"text-red-400")}>
-                        {tsxPct!=null ? pct(tsxPct) : "—"}
-                      </td>
-                      <td className="px-2 py-2">
-                        {!isLive && (isEditing
-                          ? <div className="flex gap-1">
-                              <button onClick={() => saveEdit(row.year)} className="text-[10px] bg-green-600 text-white px-1.5 py-0.5 rounded">✓</button>
-                              <button onClick={() => setEditingRow(null)} className="text-[10px] bg-gray-300 text-gray-700 px-1.5 py-0.5 rounded">✕</button>
-                            </div>
-                          : <button onClick={() => startEdit(row)} className="text-[10px] text-gray-400 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-blue-50">✎</button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-3 py-2 text-[10px] text-gray-400 border-t">
-            * % Change excludes cash deposited that year · All values in CAD (USD converted at {USD_CAD})
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Dividend bar chart */}
       <Card className="bg-white">

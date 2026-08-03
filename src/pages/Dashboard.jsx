@@ -14,7 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import StockDetailPanel from "@/components/portfolio/StockDetailPanel";
 import ClosedPositions from "@/components/portfolio/ClosedPositions";
 import Watchlist from "@/components/portfolio/Watchlist";
-import AccountSummary from "@/components/analytics/AccountSummary";
 import PositionSummary from "@/components/analytics/PositionSummary";
 import { Widget, WidgetGrid, WidgetErrorBoundary } from "@/components/layout/DashboardLayout";
 import AddStockForm from "@/components/portfolio/AddStockForm";
@@ -886,7 +885,6 @@ function DashboardInner() {
       { id:"yoy",         label:"Year over Year" },
       { id:"histdiv",     label:"Dividend History" },
       { id:"analytics",   label:"Analytics" },
-      { id:"summary",     label:"Account Summary" },
       { id:"projection",  label:"Projection at 60" },
       { id:"settings",    label:"Settings" },
     ]
@@ -1755,15 +1753,9 @@ function DashboardInner() {
                         <div className="flex-1 min-w-[300px]"><WidgetErrorBoundary title="Dividend Charts"><DividendCharts dividends={dividends} stocks={stocks} globalCurrency={globalCurrency} /></WidgetErrorBoundary></div>
                       </div>
                       <WidgetErrorBoundary title="Year over Year"><YearOverYear stocks={stocks} transactions={transactions} cashContributions={cashContributions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
-                      <WidgetErrorBoundary title="Account Summary"><AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} /></WidgetErrorBoundary>
                     </div>
                   )})()
                 }
-
-                {/* ACCOUNT SUMMARY */}
-                {activeTab === "summary" && (
-                  <AccountSummary stocks={stocks} transactions={transactions} dividends={dividends} prices={prices} totalValue={totalValue} totalDividendsReceived={totalDividendsReceived} estAnnualDividends={estAnnualDividends} />
-                )}
 
                 {/* PROJECTION AT 60 */}
                 {activeTab === "projection" && (
