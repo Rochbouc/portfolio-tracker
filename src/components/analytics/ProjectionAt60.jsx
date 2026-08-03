@@ -92,15 +92,18 @@ function buildTable(acct) {
   const { startAge, endAge, contributions } = acct
   const actuals = acct.actuals || {}
   const actualAges = Object.keys(actuals).map(Number).filter(n => !isNaN(n)).sort((a,b) => a-b)
-  if (actualAges.length === 0) return []
-  const lastActAge = actualAges[actualAges.length-1]
+  // A brand-new account has no actuals yet — that must NOT produce an empty
+  // table (previously it did, via an early `return []`, which meant there
+  // were no rows to click at all). Always build the full age range; only
+  // start computing projections once the account has at least one actual.
+  const lastActAge = actualAges.length ? actualAges[actualAges.length-1] : null
   const rows = []
-  const projVals = RATES.map(() => actuals[lastActAge] || 0)
+  const projVals = RATES.map(() => (lastActAge != null ? (actuals[lastActAge] || 0) : 0))
   for (let age = startAge; age <= endAge; age++) {
     const contrib  = contributions?.[age] ?? 0
     const actual   = actuals?.[age] ?? null
     const projected = RATES.map((rate, ri) => {
-      if (age <= lastActAge) return null
+      if (lastActAge == null || age <= lastActAge) return null
       projVals[ri] = projVals[ri] * (1 + rate) + contrib
       return projVals[ri]
     })
