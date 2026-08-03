@@ -7,11 +7,21 @@ import { TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // Index data from spreadsheet
+// SP500, NASDAQ, DowJones verified against real year-end closing levels
+// (price index, no dividends) as of Aug 3, 2026 close: SP500 7,600.50,
+// NASDAQ 25,913.90, Dow Jones 53,178.41. TSX verified as of Jul 31, 2026
+// close (35,226.14) — most recent verified at time of update, a couple
+// trading days behind the others. Russell 2000's 2025 year-end close is an
+// estimate derived from its reported ~12.07% full-year return (no single
+// verified exact print found); 2026 value (2,982.95) is a real Aug 3, 2026
+// close. Update the live year's value periodically; % change for every year
+// is derived automatically from consecutive year-end values below.
 const INDEX_DATA = {
-  SP500:     {2017:2274.64,2018:2500,2019:3200,2020:3756,2021:4766.18,2022:3839.50,2023:4743,2024:5881.63,2025:6858.47,2026:7372.06},
-  NASDAQ:    {2017:7077,2018:6463,2019:9100,2020:12888,2021:15644.97,2022:10466.48,2023:14782,2024:19310.79,2025:23235.63,2026:25379.81},
-  TSX:       {2017:16347,2018:14426,2019:17066,2020:17433,2021:21222.84,2022:19384.92,2023:20906,2024:24727.94,2025:31883.37,2026:34971.80},
-  DowJones:  {2017:25100,2018:22700,2019:28950,2020:30606,2021:36338.30,2022:33147.25,2023:37743,2024:42544.22,2025:48382.39,2026:52208.88},
+  SP500:      {2017:2673.61,2018:2506.85,2019:3230.78,2020:3756.07,2021:4766.18,2022:3839.50,2023:4769.83,2024:5881.63,2025:6845.50,2026:7600.50},
+  NASDAQ:     {2017:6903.39,2018:6635.28,2019:8972.61,2020:12888.28,2021:15644.97,2022:10466.48,2023:15011.35,2024:19310.79,2025:23419.08,2026:25913.90},
+  TSX:        {2017:16209.13,2018:14322.86,2019:17063.43,2020:17433.36,2021:21222.84,2022:19384.92,2023:20958.44,2024:24727.94,2025:31712.76,2026:35226.14},
+  DowJones:   {2017:24719.22,2018:23327.46,2019:28538.44,2020:30606.48,2021:36338.30,2022:33147.25,2023:35314.49,2024:42573.73,2025:48063.29,2026:53178.41},
+  Russell2000:{2017:1535.51,2018:1348.56,2019:1668.47,2020:1974.86,2021:2245.31,2022:1761.25,2023:2027.07,2024:2230.16,2025:2500.02,2026:2982.95},
 }
 
 // Portfolio history from spreadsheet (account summary tab)
@@ -37,7 +47,7 @@ function fmt(n, dec=0) {
 }
 function fmtPct(n) { if (n == null) return "—"; return (n>=0?"+":"")+n.toFixed(2)+"%" }
 
-const COLORS = {SP500:"#3b82f6",NASDAQ:"#8b5cf6",TSX:"#10b981",DowJones:"#f59e0b",portfolio:"#1d4ed8",withDiv:"#16a34a"}
+const COLORS = {SP500:"#3b82f6",NASDAQ:"#8b5cf6",TSX:"#10b981",DowJones:"#f59e0b",Russell2000:"#ec4899",portfolio:"#1d4ed8",withDiv:"#16a34a"}
 
 export default function YearOverYearPerformance({ stocks=[], transactions=[], cashContributions=[], dividends=[], prices={}, totalValue=null, totalDividendsReceived=null, estAnnualDividends=null }) {
   const [history, setHistory] = useState(() => load() || PORTFOLIO_HISTORY_DEFAULTS.map(r => ({...r})))
@@ -160,8 +170,8 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
     save(updated); setHistory(updated); setEditingRow(newRow.year); setEditDraft(newRow)
   }
 
-  const allIndices = ["SP500","NASDAQ","TSX","DowJones","portfolio","withDiv"]
-  const indexLabels = {SP500:"S&P 500",NASDAQ:"NASDAQ",TSX:"TSX",DowJones:"Dow Jones",portfolio:"Portfolio",withDiv:"Portfolio+Div"}
+  const allIndices = ["SP500","NASDAQ","TSX","DowJones","Russell2000","portfolio","withDiv"]
+  const indexLabels = {SP500:"S&P 500",NASDAQ:"NASDAQ",TSX:"TSX",DowJones:"Dow Jones",Russell2000:"Russell 2000",portfolio:"Portfolio",withDiv:"Portfolio+Div"}
 
   // Average performance excluding contributions — compounded (CAGR-style),
   // not a simple arithmetic mean, since arithmetic averaging overstates the
@@ -270,7 +280,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
             <table className="w-full text-[11px]">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {["Year","Market Value","Invested","Cash Dep","% Change*","Proj Div","Act Div","SP500","TSX"].map(h => (
+                  {["Year","Market Value","Invested","Cash Dep","% Change*","Proj Div","Act Div","SP500","TSX","NASDAQ","Dow Jones","Russell 2000"].map(h => (
                     <th key={h} className="px-2 py-2 text-left text-gray-500 font-medium whitespace-nowrap">{h}</th>
                   ))}
                   <th className="px-2 py-2"></th>
@@ -288,7 +298,7 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
                             className="w-20 text-[11px] border border-blue-300 rounded px-1 py-0.5 focus:outline-none" />
                         </td>
                       ))}
-                      <td colSpan={3} />
+                      <td colSpan={6} />
                       <td className="px-2 py-1">
                         <div className="flex gap-1">
                           <button onClick={saveEdit} className="text-green-600 text-xs px-1.5 py-0.5 bg-green-100 rounded hover:bg-green-200">Save</button>
@@ -320,6 +330,18 @@ export default function YearOverYearPerformance({ stocks=[], transactions=[], ca
                       <td className={cn("px-2 py-1.5 text-[10px]",
                         row.idxChanges?.TSX==null?"text-gray-300":row.idxChanges.TSX>=0?"text-green-600":"text-red-400")}>
                         {row.idxChanges?.TSX != null ? fmtPct(row.idxChanges.TSX) : "—"}
+                      </td>
+                      <td className={cn("px-2 py-1.5 text-[10px]",
+                        row.idxChanges?.NASDAQ==null?"text-gray-300":row.idxChanges.NASDAQ>=0?"text-purple-600":"text-red-400")}>
+                        {row.idxChanges?.NASDAQ != null ? fmtPct(row.idxChanges.NASDAQ) : "—"}
+                      </td>
+                      <td className={cn("px-2 py-1.5 text-[10px]",
+                        row.idxChanges?.DowJones==null?"text-gray-300":row.idxChanges.DowJones>=0?"text-amber-600":"text-red-400")}>
+                        {row.idxChanges?.DowJones != null ? fmtPct(row.idxChanges.DowJones) : "—"}
+                      </td>
+                      <td className={cn("px-2 py-1.5 text-[10px]",
+                        row.idxChanges?.Russell2000==null?"text-gray-300":row.idxChanges.Russell2000>=0?"text-pink-600":"text-red-400")}>
+                        {row.idxChanges?.Russell2000 != null ? fmtPct(row.idxChanges.Russell2000) : "—"}
                       </td>
                       <td className="px-2 py-1.5 text-gray-300 text-[10px]">✎</td>
                     </tr>
