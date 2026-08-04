@@ -114,7 +114,7 @@ const KNOWN_DIVIDENDS = {
   "DIVO":  { rate: 1.80, freq: 12, currency: "USD" },  // Amplify Enhanced Dividend Income
   // Schwab ETFs
   "SCHD":  { rate: 2.76, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Schwab US Dividend Equity — quarterly
-  "SCHP":  { rate: 1.20, freq: 12, currency: "USD", payDay: 1  },  // Schwab U.S. TIPS ETF — monthly
+  "SCHP":  { rate: 1.20, freq: 12, currency: "USD", payDay: 7  },  // Schwab U.S. TIPS ETF — monthly, paid ~5th-8th
   "SCHB":  { rate: 1.40, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
   "SCHX":  { rate: 1.40, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
   "SCHF":  { rate: 1.60, freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },
@@ -207,8 +207,8 @@ const KNOWN_DIVIDENDS = {
   "SU.TO":   { rate: 2.20, freq: 4, currency: "CAD", payDay: 25, payMonths: [3,6,9,12] },
   "CNQ.TO":  { rate: 4.00, freq: 4, currency: "CAD", payDay: 15, payMonths: [1,4,7,10] },
   "SOBO":      { rate: 2.79,  freq: 4,  currency: "CAD", payMonths: [1,4,7,10], payDay: 15 },  // South Bow Corp quarterly
-  "HR-UN.TO":  { rate: 0.60,   freq: 12, currency: "CAD", payDay: 1  },  // H&R REIT — $1.75/mo (35sh) + $5.00/mo (100sh) = $0.60/sh/yr
-  "REI-UN.TO": { rate: 1.04,   freq: 12, currency: "CAD", payDay: 2  },  // RioCan REIT — $5.60/mo (58sh) + $0.48/mo (5sh)
+  "HR-UN.TO":  { rate: 0.60,   freq: 12, currency: "CAD", payDay: 15 },  // H&R REIT — paid ~14th-17th, mid-month (was wrongly set to 1st)
+  "REI-UN.TO": { rate: 1.04,   freq: 12, currency: "CAD", payDay: 8  },  // RioCan REIT — paid ~5th-10th (was wrongly set to 2nd)
   "VOO":       { rate: 7.86,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard S&P500
   "VTI":       { rate: 3.55,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard Total Market
   "CANY.TO":   { rate: 2.52,   freq: 12, currency: "CAD", payDay: 9  },  // Evolve Canadian Equity — $12.60/mo / 60sh
