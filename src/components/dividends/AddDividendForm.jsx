@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Calendar, CheckCircle, X } from "lucide-react"
 import { getDividendData } from "@/api/dividendData"
 import { getPaySchedule } from "@/api/dividendData"
+import { cloudSetValue } from "@/api/localData"
 import { cn } from "@/lib/utils"
 
 const CASH_ID_CAD = "__CASH_CAD__"
@@ -49,6 +50,7 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
     next.add(key)
     setDismissed(next)
     localStorage.setItem("dismissed_div_suggestions", JSON.stringify([...next]))
+    cloudSetValue("dismissed_div_suggestions", [...next])
   }
 
   // Clean up dismissed entries older than 60 days to keep storage tidy
@@ -63,6 +65,7 @@ export default function AddDividendForm({ open, onOpenChange, onSubmit, stocks =
       const next = new Set(filtered)
       setDismissed(next)
       localStorage.setItem("dismissed_div_suggestions", JSON.stringify(filtered))
+      cloudSetValue("dismissed_div_suggestions", filtered)
     }
   }, [])
 

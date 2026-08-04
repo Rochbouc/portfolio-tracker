@@ -152,7 +152,16 @@ export async function cloudGetValue(key) {
   } catch { return null }
 }
 
-const SIMPLE_SYNCED_KEYS = ["watchlist_items", "price_alerts"]
+const SIMPLE_SYNCED_KEYS = [
+  "watchlist_items", "price_alerts",
+  "groq_api_key", "custom_account_types",
+  "historical_dividends_per_stock_v2", "yoy_portfolio_history_v1",
+  "proj60_accounts_v3", "proj60_settings_v1", "tfsa_tracker_v1",
+  "contribution_tracking", "dividend_archive", "dismissed_div_suggestions",
+]
+// Keys stored as a raw string in localStorage (not JSON) — everything else
+// in SIMPLE_SYNCED_KEYS is JSON (array/object).
+const RAW_STRING_KEYS = ["groq_api_key"]
 
 export const Stock = makeEntity("stocks");
 export const Transaction = makeEntity("transactions");
@@ -186,6 +195,11 @@ export async function uploadLocalDataToCloud() {
   for (const key of SIMPLE_SYNCED_KEYS) {
     const raw = localStorage.getItem(key);
     if (raw == null) continue;
+    if (RAW_STRING_KEYS.includes(key)) {
+      cloudSetValue(key, raw);
+      totalDocs += 1;
+      continue;
+    }
     try {
       cloudSetValue(key, JSON.parse(raw));
       totalDocs += 1;
@@ -206,7 +220,7 @@ export async function downloadCloudDataToLocal() {
     // Same rule as fetchAndMirror: an empty/missing cloud value must not
     // wipe out real local data that just hasn't been uploaded yet.
     if (cloudValue != null) {
-      localStorage.setItem(key, JSON.stringify(cloudValue));
+      localStorage.setItem(key, RAW_STRING_KEYS.includes(key) ? cloudValue : JSON.stringify(cloudValue));
     }
   }
 }
@@ -218,6 +232,7 @@ export function exportAllData() {
     data[key] = getAll(key);
   }
   for (const key of SIMPLE_SYNCED_KEYS) {
+    if (RAW_STRING_KEYS.includes(key)) { data[key] = localStorage.getItem(key) || null; continue; }
     try { data[key] = JSON.parse(localStorage.getItem(key) || "null"); }
     catch { data[key] = null; }
   }
@@ -230,7 +245,7 @@ export function importAllData(data) {
   }
   for (const key of SIMPLE_SYNCED_KEYS) {
     if (data[key] != null) {
-      localStorage.setItem(key, JSON.stringify(data[key]));
+      localStorage.setItem(key, RAW_STRING_KEYS.includes(key) ? data[key] : JSON.stringify(data[key]));
       cloudSetValue(key, data[key]);
     }
   }

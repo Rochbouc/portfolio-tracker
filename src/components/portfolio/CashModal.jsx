@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { setCash, adjustCash, recordCashContribution } from "@/api/localData"
+import { setCash, adjustCash, recordCashContribution, cloudSetValue } from "@/api/localData"
 import { getRate } from "@/api/rateContext"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -29,6 +29,7 @@ function bumpContributionRoom(account, deltaCAD) {
       const contributed = (cur.contributed ?? 55756.68) + deltaCAD
       const next = { ...contribs, TFSA: { room: cur.room ?? 109000, contributed } }
       localStorage.setItem("contribution_tracking", JSON.stringify(next))
+      cloudSetValue("contribution_tracking", next)
     } else {
       const year = new Date().getFullYear()
       const yearData = contribs[year] || {}
@@ -36,6 +37,7 @@ function bumpContributionRoom(account, deltaCAD) {
       const contributed = (acctData.contributed || 0) + deltaCAD
       const next = { ...contribs, [year]: { ...yearData, RRSP: { ...acctData, contributed } } }
       localStorage.setItem("contribution_tracking", JSON.stringify(next))
+      cloudSetValue("contribution_tracking", next)
     }
   } catch {}
 }

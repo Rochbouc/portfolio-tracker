@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { cloudSetValue } from "@/api/localData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { PiggyBank, Plus, Trash2, Check, X, Pencil } from "lucide-react"
@@ -13,7 +14,7 @@ const ANNUAL_LIMITS = {
 }
 
 function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") } catch { return {} } }
-function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
+function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); cloudSetValue(STORAGE_KEY, d) }
 
 function fmt(n) {
   return new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n||0)

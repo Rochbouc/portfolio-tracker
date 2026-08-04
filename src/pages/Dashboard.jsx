@@ -470,7 +470,7 @@ function BuyOpportunitiesPanel() {
 // Get a free key at https://console.groq.com (no credit card needed)
 const GROQ_KEY_STORAGE = "groq_api_key";
 const getGroqKey = () => localStorage.getItem(GROQ_KEY_STORAGE) || "";
-const saveGroqKey = k => localStorage.setItem(GROQ_KEY_STORAGE, k.trim());
+const saveGroqKey = k => { const v = k.trim(); localStorage.setItem(GROQ_KEY_STORAGE, v); cloudSetValue(GROQ_KEY_STORAGE, v); };
 
 function GroqKeyPrompt({ onSaved }) {
   const [val, setVal] = useState("");

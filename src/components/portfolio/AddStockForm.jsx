@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { fetchQuote } from "@/api/stockSearch";
+import { cloudSetValue } from "@/api/localData";
 import TickerSearch from "./TickerSearch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,7 @@ function loadCustomAccounts() {
 }
 function saveCustomAccounts(list) {
   localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(list));
+  cloudSetValue(ACCOUNTS_KEY, list);
 }
 
 export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }) {

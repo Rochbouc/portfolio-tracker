@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
+import { cloudSetValue } from "@/api/localData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { TrendingUp, TrendingDown, DollarSign, PiggyBank } from "lucide-react"
@@ -70,6 +71,7 @@ export default function AccountSummary({ stocks=[], transactions=[], dividends=[
     )
     setHistoryRaw(next)
     localStorage.setItem(YOY_STORAGE, JSON.stringify(next))
+    cloudSetValue(YOY_STORAGE, next)
     setEditingRow(null)
   }
 

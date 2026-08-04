@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
+import { cloudSetValue } from "@/api/localData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { Pencil, Check, X, PiggyBank, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react"
@@ -26,7 +27,7 @@ function load() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {} }
   catch { return {} }
 }
-function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
+function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); cloudSetValue(STORAGE_KEY, d) }
 
 function fmt(n, cur="CAD", displayCur="CAD") {
   if (!n && n !== 0) return ""

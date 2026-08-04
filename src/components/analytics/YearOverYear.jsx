@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
 import { getYearContributions } from "@/lib/contributions"
+import { cloudSetValue } from "@/api/localData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts"
 import { TrendingUp, TrendingDown } from "lucide-react"
@@ -39,7 +40,7 @@ const PORTFOLIO_HISTORY_DEFAULTS = [
 
 const STORAGE_KEY = "yoy_portfolio_history_v1"
 function load() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch { return null } }
-function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
+function save(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); cloudSetValue(STORAGE_KEY, d) }
 
 function fmt(n, dec=0) {
   if (n == null || isNaN(n)) return "—"

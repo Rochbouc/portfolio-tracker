@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react"
-import { exportAllData, importAllData, uploadLocalDataToCloud, getSyncUser } from "@/api/localData"
+import { exportAllData, importAllData, uploadLocalDataToCloud, getSyncUser, cloudSetValue } from "@/api/localData"
 import { firebaseConfigured } from "@/api/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -66,6 +66,7 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
       })
       archive[year] = summary
       localStorage.setItem("dividend_archive", JSON.stringify(archive))
+      cloudSetValue("dividend_archive", archive)
 
       // Also save to historical_dividends_per_stock_v2 for the Dividend History tab
       // This is already handled by the user manually entering past years
@@ -112,7 +113,7 @@ export default function DataBackup({ onRestored, stocks = [], prices = {} }) {
     try { return JSON.parse(localStorage.getItem("contribution_tracking") || "{}") } catch { return {} }
   })
   const year = new Date().getFullYear()
-  function saveContribs(next) { setContribs(next); localStorage.setItem("contribution_tracking", JSON.stringify(next)) }
+  function saveContribs(next) { setContribs(next); localStorage.setItem("contribution_tracking", JSON.stringify(next)); cloudSetValue("contribution_tracking", next) }
   function updateContrib(account, field, value) {
     const next = { ...contribs, [year]: { ...(contribs[year]||{}), [account]: { ...(contribs[year]?.[account]||{}), [field]: parseFloat(value)||0 } } }
     saveContribs(next)

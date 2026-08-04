@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react"
+import { cloudSetValue } from "@/api/localData"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts"
 import { Target, RotateCcw, Pencil, Check, X, Plus, Trash2 } from "lucide-react"
@@ -80,12 +81,12 @@ function loadAccounts() {
     return ensureActuals(structuredClone(DEFAULTS))
   }
 }
-function saveAccounts(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)) }
+function saveAccounts(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); cloudSetValue(STORAGE_KEY, d) }
 
 function loadSettings() {
   try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {} } catch { return {} }
 }
-function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)) }
+function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); cloudSetValue(SETTINGS_KEY, s) }
 
 // formula: identical to spreadsheet
 function buildTable(acct) {
