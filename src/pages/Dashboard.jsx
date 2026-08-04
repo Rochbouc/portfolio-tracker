@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getRate } from "@/api/rateContext"
 import { getYearContributions } from "@/lib/contributions"
-import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash } from "@/api/localData";
+import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash, cloudSetValue } from "@/api/localData";
 import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
 import { getPaySchedule } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
@@ -159,7 +159,7 @@ function PriceAlertsPanel() {
     return () => { window.removeEventListener("storage", onStorage); clearInterval(id) }
   }, []);
 
-  function saveAlerts(list) { localStorage.setItem("price_alerts", JSON.stringify(list)); setAlerts(list); }
+  function saveAlerts(list) { localStorage.setItem("price_alerts", JSON.stringify(list)); setAlerts(list); cloudSetValue("price_alerts", list); }
 
   function addAlert() {
     if (!symbol.trim() || !targetPrice) return;

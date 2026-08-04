@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Eye, Trash2, RefreshCw, TrendingUp, TrendingDown, Bell, BellOff, X, BellRing } from "lucide-react"
 import { fetchQuote, searchTickers } from "@/api/stockSearch"
+import { cloudSetValue } from "@/api/localData"
 import { useToast } from "@/components/ui/toast"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 import { cn } from "@/lib/utils"
@@ -210,10 +211,15 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   const alertsRef = useRef(alerts)
   alertsRef.current = alerts
 
-  function saveItems(list)  { save(STORAGE_KEY, list); setItems(list) }
+  function saveItems(list)  {
+    save(STORAGE_KEY, list)
+    setItems(list)
+    cloudSetValue(STORAGE_KEY, list)   // push to Firestore, cross-device sync
+  }
   function saveAlerts(list) {
     localStorage.setItem(ALERTS_KEY, JSON.stringify(list))
     setAlerts(list)
+    cloudSetValue(ALERTS_KEY, list)    // push to Firestore, cross-device sync
     // Dispatch storage event so sidebar PriceAlertsPanel syncs immediately
     window.dispatchEvent(new StorageEvent("storage", { key: ALERTS_KEY, newValue: JSON.stringify(list) }))
   }

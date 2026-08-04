@@ -11,7 +11,7 @@
 // dividend forecasts) are NOT synced — those stay per-device for now.
 import { db } from "./firebase"
 import {
-  collection, doc, getDocs, setDoc, deleteDoc, writeBatch,
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch,
 } from "firebase/firestore"
 
 let currentUid = null
@@ -127,6 +127,33 @@ function makeEntity(key) {
   };
 }
 
+// ── Simple key/value cloud sync ──────────────────────────────────────
+// For small pieces of data that live as a single localStorage value
+// (a plain array or object) rather than a collection of entities with
+// ids — e.g. the watchlist symbol list and price alert list. Stored as
+// one Firestore doc per key under users/{uid}/meta/{key}.
+function metaDocRef(key) { return doc(db, "users", currentUid, "meta", key) }
+
+export function cloudSetValue(key, value) {
+  if (!cloudReady()) return
+  setDoc(metaDocRef(key), { value }).catch(() => {})
+}
+
+// Fetches the cloud value for `key`. Returns null if not signed in, not
+// configured, not yet present in Firestore, or on any error — callers
+// should treat null as "no cloud value yet" and keep using local data,
+// same rule as fetchAndMirror: never let an empty/missing cloud result
+// wipe out real local data.
+export async function cloudGetValue(key) {
+  if (!cloudReady()) return null
+  try {
+    const snap = await getDoc(metaDocRef(key))
+    return snap.exists() ? snap.data().value : null
+  } catch { return null }
+}
+
+const SIMPLE_SYNCED_KEYS = ["watchlist_items", "price_alerts"]
+
 export const Stock = makeEntity("stocks");
 export const Transaction = makeEntity("transactions");
 export const Dividend = makeEntity("dividends");
@@ -156,6 +183,14 @@ export async function uploadLocalDataToCloud() {
     await batch.commit();
     totalDocs += items.length;
   }
+  for (const key of SIMPLE_SYNCED_KEYS) {
+    const raw = localStorage.getItem(key);
+    if (raw == null) continue;
+    try {
+      cloudSetValue(key, JSON.parse(raw));
+      totalDocs += 1;
+    } catch { /* skip malformed local value */ }
+  }
   return totalDocs;
 }
 
@@ -166,6 +201,14 @@ export async function downloadCloudDataToLocal() {
   for (const key of SYNCED_KEYS) {
     await fetchAndMirror(key);
   }
+  for (const key of SIMPLE_SYNCED_KEYS) {
+    const cloudValue = await cloudGetValue(key);
+    // Same rule as fetchAndMirror: an empty/missing cloud value must not
+    // wipe out real local data that just hasn't been uploaded yet.
+    if (cloudValue != null) {
+      localStorage.setItem(key, JSON.stringify(cloudValue));
+    }
+  }
 }
 
 // Export/import all data as JSON (local mirror — used for manual backup file)
@@ -174,12 +217,22 @@ export function exportAllData() {
   for (const key of SYNCED_KEYS) {
     data[key] = getAll(key);
   }
+  for (const key of SIMPLE_SYNCED_KEYS) {
+    try { data[key] = JSON.parse(localStorage.getItem(key) || "null"); }
+    catch { data[key] = null; }
+  }
   return data;
 }
 
 export function importAllData(data) {
   for (const key of SYNCED_KEYS) {
     if (data[key]) saveAll(key, data[key]);
+  }
+  for (const key of SIMPLE_SYNCED_KEYS) {
+    if (data[key] != null) {
+      localStorage.setItem(key, JSON.stringify(data[key]));
+      cloudSetValue(key, data[key]);
+    }
   }
 }
 
