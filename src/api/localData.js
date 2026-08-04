@@ -56,13 +56,22 @@ function cloudBatchSet(key, items) {
 // local mirror. Falls back to the local mirror (silently) if offline or
 // Firestore isn't reachable — Firestore's own persistent cache usually
 // handles this already, this is just an extra safety net.
+//
+// IMPORTANT: if Firestore comes back empty (e.g. first login, before you've
+// ever clicked "Upload to Cloud"), we must NOT overwrite the local mirror
+// with that empty result — that would silently wipe out real local data
+// that just hasn't been uploaded yet. Only overwrite local data once the
+// cloud actually has something in it.
 async function fetchAndMirror(key) {
   if (!cloudReady()) return getAll(key)
   try {
     const snap = await getDocs(colRef(key))
     const items = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-    saveAll(key, items)
-    return items
+    if (items.length > 0) {
+      saveAll(key, items)
+      return items
+    }
+    return getAll(key)
   } catch {
     return getAll(key)
   }
