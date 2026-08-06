@@ -907,6 +907,39 @@ function DashboardInner() {
 
   const loadAll = useCallback(async () => {
     const [s, t, d, cp, cc] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list(), CashContribution.list()]);
+
+    // Auto-repair annual_dividend records saved as TOTAL instead of PER-SHARE
+    // (a past AddStockForm bug — every other part of the app multiplies
+    // annual_dividend × shares itself, so a total-valued record gets counted
+    // shares× too high). Detected by comparing the stored value against an
+    // independently-derived per-share amount from dividend_yield × price;
+    // only touches stocks where the stored value is close to (per-share ×
+    // shares) and not close to per-share itself. Self-guarding: once fixed,
+    // a stock's ratio no longer looks bugged, so this is safe to run every load.
+    const divFixes = [];
+    for (const st of s) {
+      const shares = parseFloat(st.shares) || 0;
+      const storedAnnual = parseFloat(st.annual_dividend) || 0;
+      const yieldPct = parseFloat(st.dividend_yield) || 0;
+      const price = parseFloat(st.current_price) || parseFloat(st.avg_cost) || 0;
+      if (shares <= 1 || storedAnnual <= 0 || yieldPct <= 0 || price <= 0) continue;
+      const expectedPerShare = (yieldPct / 100) * price;
+      if (expectedPerShare <= 0) continue;
+      const ratio = storedAnnual / expectedPerShare;
+      const closeToSharesMultiple = Math.abs(ratio - shares) / shares < 0.25;
+      const closeToPerShare = Math.abs(ratio - 1) < 0.5;
+      if (closeToSharesMultiple && !closeToPerShare) {
+        divFixes.push({ id: st.id, annual_dividend: parseFloat((storedAnnual / shares).toFixed(4)) });
+      }
+    }
+    if (divFixes.length > 0) {
+      await Promise.all(divFixes.map(f => Stock.update(f.id, { annual_dividend: f.annual_dividend }).catch(() => {})));
+      for (const f of divFixes) {
+        const idx = s.findIndex(x => x.id === f.id);
+        if (idx !== -1) s[idx] = { ...s[idx], annual_dividend: f.annual_dividend };
+      }
+    }
+
     // Force-correct currency on all dividend records using stock as source of truth
     const fixed = d.map(div => {
       if (!div.stock_id) return div;  // cash entries keep their stored currency
@@ -1125,8 +1158,11 @@ function DashboardInner() {
       const perPayment = annualDiv / freq;
       if (perPayment <= 0) return;
 
-      // For each of the past 14 days, check if a payment was expected
-      for (let daysAgo = 0; daysAgo <= 14; daysAgo++) {
+      // For each day from tomorrow back through the past 14 days, check if a
+      // payment was/is expected. Starting one day ahead (daysAgo = -1) means
+      // the suggestion shows up the day before the actual pay date, so it's
+      // ready to enter as soon as the dividend posts.
+      for (let daysAgo = -1; daysAgo <= 14; daysAgo++) {
         const checkDate = new Date(today);
         checkDate.setDate(checkDate.getDate() - daysAgo);
         const dateStr  = checkDate.toISOString().slice(0,10);

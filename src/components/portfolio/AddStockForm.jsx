@@ -122,14 +122,13 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
             const yieldPct = parseFloat((yieldRaw * 100).toFixed(3));
             setValue("dividend_yield", yieldPct);
 
-            // Estimate annual dividend: yield% × current price
+            // Estimate annual dividend per share: yield% × current price
+            // (annual_dividend is stored as PER-SHARE everywhere else in the app —
+            // Dashboard/StockDetailPanel/etc. all multiply by shares themselves)
             const price = meta.regularMarketPrice;
             if (price) {
               const annualPerShare = price * yieldRaw;
-              const shares = parseFloat(watch("shares")) || 0;
-              if (shares > 0) {
-                setValue("annual_dividend", parseFloat((annualPerShare * shares).toFixed(2)));
-              }
+              setValue("annual_dividend", parseFloat(annualPerShare.toFixed(4)));
             }
           }
 
@@ -185,16 +184,17 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
     fetchDividendData(sym);
   };
 
-  // When shares change, recalculate annual dividend
+  // When yield or price change, recalculate annual dividend PER SHARE
+  // (not total — every other part of the app multiplies annual_dividend × shares itself)
   const sharesVal = watch("shares");
   const divYieldVal = watch("dividend_yield");
   const currentPriceVal = watch("current_price") || watch("avg_cost");
   useEffect(() => {
-    if (sharesVal && divYieldVal && currentPriceVal) {
-      const annual = (divYieldVal / 100) * currentPriceVal * sharesVal;
-      if (annual > 0) setValue("annual_dividend", parseFloat(annual.toFixed(2)));
+    if (divYieldVal && currentPriceVal) {
+      const annualPerShare = (divYieldVal / 100) * currentPriceVal;
+      if (annualPerShare > 0) setValue("annual_dividend", parseFloat(annualPerShare.toFixed(4)));
     }
-  }, [sharesVal, divYieldVal]);
+  }, [divYieldVal, currentPriceVal]);
 
   const handleAddAccount = () => {
     const val = newAccount.trim();
@@ -389,8 +389,8 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
                   className="bg-white border-gray-300 text-gray-900" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-gray-500">Annual Dividend Total ({currency})</Label>
-                <Input type="number" step="0.01" {...register("annual_dividend")} placeholder="Auto-calculated"
+                <Label className="text-xs text-gray-500">Annual Dividend Per Share ({currency})</Label>
+                <Input type="number" step="0.0001" {...register("annual_dividend")} placeholder="Auto-calculated"
                   className="bg-white border-gray-300 text-gray-900" />
               </div>
             </div>
