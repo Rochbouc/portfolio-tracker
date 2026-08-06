@@ -345,6 +345,20 @@ Use frequency: 12=monthly, 4=quarterly, 2=semi-annual, 1=annual. Use 0 if no div
 // ── Main export: get dividend info for a stock ─────────────────────
 // Returns { annualRatePerShare, yieldDecimal, frequency, source }
 
+// ── Quick lookup: get the known per-share annual rate for a symbol,
+// no network required. Used to independently sanity-check stored data.
+export function getKnownRatePerShare(symbol) {
+  const sym = (symbol || "").toUpperCase()
+  const known = KNOWN_DIVIDENDS[sym]
+    || KNOWN_DIVIDENDS[sym + ".TO"]
+    || KNOWN_DIVIDENDS[sym + ".UN.TO"]
+    || KNOWN_DIVIDENDS[sym + ".UN"]
+    || KNOWN_DIVIDENDS[sym.replace(/\.TO$/, "")]
+    || KNOWN_DIVIDENDS[sym.replace(/\.UN\.TO$/, "")]
+    || KNOWN_DIVIDENDS[sym.replace(/\.UN$/, "")]
+  return known && known.rate > 0 ? known.rate : null
+}
+
 // ── Quick lookup: get payMonths + payDay for a symbol (no network) ─
 export function getPaySchedule(symbol) {
   const sym = (symbol || "").toUpperCase()

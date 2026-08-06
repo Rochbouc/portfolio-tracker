@@ -3,7 +3,7 @@ import { getRate } from "@/api/rateContext"
 import { getYearContributions } from "@/lib/contributions"
 import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash, cloudSetValue } from "@/api/localData";
 import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
-import { getPaySchedule } from "@/api/dividendData";
+import { getPaySchedule, getKnownRatePerShare } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
 import { logout } from "@/components/auth/Login";
 import { ToastProvider, useToast } from "@/components/ui/toast";
@@ -912,21 +912,29 @@ function DashboardInner() {
     // (a past AddStockForm bug — every other part of the app multiplies
     // annual_dividend × shares itself, so a total-valued record gets counted
     // shares× too high). Detected by comparing the stored value against an
-    // independently-derived per-share amount from dividend_yield × price;
-    // only touches stocks where the stored value is close to (per-share ×
-    // shares) and not close to per-share itself. Self-guarding: once fixed,
-    // a stock's ratio no longer looks bugged, so this is safe to run every load.
+    // independently-derived per-share reference: prefer the app's own known
+    // per-share dividend table (covers most held tickers, no dependency on
+    // dividend_yield ever having been set), falling back to yield × price
+    // when a stock isn't in that table. Only flags stocks where the stored
+    // value is close to (reference × shares) and not close to the reference
+    // itself. Self-guarding: once fixed, a stock's ratio no longer looks
+    // bugged, so this is safe to run every load.
     const divFixes = [];
     for (const st of s) {
       const shares = parseFloat(st.shares) || 0;
       const storedAnnual = parseFloat(st.annual_dividend) || 0;
-      const yieldPct = parseFloat(st.dividend_yield) || 0;
-      const price = parseFloat(st.current_price) || parseFloat(st.avg_cost) || 0;
-      if (shares <= 1 || storedAnnual <= 0 || yieldPct <= 0 || price <= 0) continue;
-      const expectedPerShare = (yieldPct / 100) * price;
-      if (expectedPerShare <= 0) continue;
-      const ratio = storedAnnual / expectedPerShare;
-      const closeToSharesMultiple = Math.abs(ratio - shares) / shares < 0.25;
+      if (shares <= 1 || storedAnnual <= 0) continue;
+
+      let referencePerShare = getKnownRatePerShare(st.symbol);
+      if (!referencePerShare) {
+        const yieldPct = parseFloat(st.dividend_yield) || 0;
+        const price = parseFloat(st.current_price) || parseFloat(st.avg_cost) || 0;
+        if (yieldPct > 0 && price > 0) referencePerShare = (yieldPct / 100) * price;
+      }
+      if (!referencePerShare || referencePerShare <= 0) continue;
+
+      const ratio = storedAnnual / referencePerShare;
+      const closeToSharesMultiple = Math.abs(ratio - shares) / shares < 0.3;
       const closeToPerShare = Math.abs(ratio - 1) < 0.5;
       if (closeToSharesMultiple && !closeToPerShare) {
         divFixes.push({ id: st.id, annual_dividend: parseFloat((storedAnnual / shares).toFixed(4)) });
