@@ -948,6 +948,34 @@ function DashboardInner() {
       }
     }
 
+    // Auto-clear implausible annual_dividend values — data providers
+    // occasionally return garbage dividend figures for illiquid microcaps
+    // and penny stocks (seen in practice: a $0.03 CNSX stock stored with a
+    // 960% dividend yield). A dividend implying more than 150% yield is
+    // essentially never real — even the highest legitimate covered-call /
+    // options-income ETFs in a typical portfolio top out well under 100% —
+    // so treat it as corrupted and clear it rather than let it silently
+    // inflate the estimate. Skipped if the app's own known-dividend table
+    // independently confirms the rate really is that high.
+    const yieldSanityFixes = [];
+    for (const st of s) {
+      const price = parseFloat(st.current_price) || 0;
+      const storedAnnual = parseFloat(st.annual_dividend) || 0;
+      if (price <= 0 || storedAnnual <= 0) continue;
+      const impliedYieldPct = (storedAnnual / price) * 100;
+      if (impliedYieldPct <= 150) continue;
+      const knownRate = getKnownRatePerShare(st.symbol);
+      if (knownRate && Math.abs(knownRate - storedAnnual) / storedAnnual < 0.5) continue; // independently confirmed legitimate
+      yieldSanityFixes.push({ id: st.id });
+    }
+    if (yieldSanityFixes.length > 0) {
+      await Promise.all(yieldSanityFixes.map(f => Stock.update(f.id, { annual_dividend: 0, dividend_yield: 0 }).catch(() => {})));
+      for (const f of yieldSanityFixes) {
+        const idx = s.findIndex(x => x.id === f.id);
+        if (idx !== -1) s[idx] = { ...s[idx], annual_dividend: 0, dividend_yield: 0 };
+      }
+    }
+
     // Force-correct currency on all dividend records using stock as source of truth
     const fixed = d.map(div => {
       if (!div.stock_id) return div;  // cash entries keep their stored currency
