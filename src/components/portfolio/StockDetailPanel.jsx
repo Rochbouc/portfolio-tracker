@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { fetchChartData, fetchKeyStats } from "@/api/stockSearch";
+import { fetchGroqAnalystEstimate } from "@/api/analystEstimate";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Loader2, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,42 +38,6 @@ function StatItem({ label, value }) {
 }
 
 // Ask Groq for analyst estimates — uses existing Groq key if set
-async function fetchGroqAnalystEstimate(symbol, name, price, week52Low, week52High, sma200, currency) {
-  const key = getGroqKey();
-  if (!key) return null;
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type":"application/json", "Authorization":`Bearer ${key}` },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        max_tokens: 200,
-        temperature: 0.3,
-        messages: [{
-          role: "system",
-          content: "You are a financial analyst. Respond ONLY with a valid JSON object, no markdown, no explanation."
-        },{
-          role: "user",
-          content: `Give analyst estimates for ${symbol} (${name}).
-Current price: ${price} ${currency}
-52W Range: ${week52Low} - ${week52High} ${currency}
-200-day SMA: ${sma200 ? sma200.toFixed(2) : "unknown"} ${currency}
-
-Respond with ONLY this JSON (no code blocks):
-{"targetLow": number, "targetAvg": number, "targetHigh": number, "recommendation": "Strong Buy|Buy|Hold|Sell|Strong Sell", "analysts": number, "peRatio": number, "sector": "string"}`
-        }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || "";
-    // Extract JSON - handle both raw JSON and potential markdown
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[0]);
-    return parsed;
-  } catch { return null; }
-}
 
 export default function StockDetailPanel({ stock, quote, onClose }) {
   const [range, setRange]             = useState("1M");

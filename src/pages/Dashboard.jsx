@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { getRate } from "@/api/rateContext"
 import { getYearContributions } from "@/lib/contributions"
 import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash, cloudSetValue } from "@/api/localData";
-import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
+import { fetchQuote, fetchQuoteYTD, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
+import { ensureAnalystEstimate } from "@/api/analystEstimate";
+import RangeBar from "@/components/portfolio/RangeBar";
 import { getPaySchedule, getKnownRatePerShare, isDividendRefreshDue, refreshDividendScheduleCache } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
 import { logout } from "@/components/auth/Login";
@@ -1095,6 +1097,65 @@ function DashboardInner() {
     return () => { cancelled = true; };
   }, [stocks.length > 0]);
 
+  // Sector + 12-month analyst forecast + YTD % for the main holdings list —
+  // same cache keys the watchlist uses, so a symbol looked up from either
+  // place only ever gets fetched once. Groq-based (see api/analystEstimate);
+  // requires a Groq key to be set, same as the existing per-stock dropdown.
+  const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v2";
+  const YTD_CACHE_KEY = "holdings_ytd_cache_v1";
+  const loadExtInfoCache = () => { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}"); } catch { return {}; } };
+  const saveExtInfoCache = c => localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c));
+  const loadYtdCache = () => { try { return JSON.parse(localStorage.getItem(YTD_CACHE_KEY) || "{}"); } catch { return {}; } };
+  const saveYtdCache = c => localStorage.setItem(YTD_CACHE_KEY, JSON.stringify(c));
+  const [stockExtInfo, setStockExtInfo] = useState(() => loadExtInfoCache());
+  const [stockYtdMap, setStockYtdMap]   = useState(() => loadYtdCache());
+
+  useEffect(() => {
+    const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))];
+    if (symbols.length === 0) return;
+
+    const needExt = symbols.filter(sym => stockExtInfo[sym] === undefined);
+    if (needExt.length > 0) {
+      (async () => {
+        const cache = loadExtInfoCache();
+        for (let i = 0; i < needExt.length; i += 3) {
+          const batch = needExt.slice(i, i + 3);
+          const results = await Promise.allSettled(batch.map(async sym => {
+            const stock = stocks.find(s => s.symbol === sym) || {};
+            const q = prices[sym] || {};
+            const est = await ensureAnalystEstimate(sym, stock.name || q.shortName || sym, q.price, q.fiftyTwoWeekLow, q.fiftyTwoWeekHigh, null, q.currency || stock.currency);
+            if (!est) return [sym, null];
+            return [sym, {
+              sector: stock.sector || est.sector || null,
+              targetLow: est.targetLow ?? null,
+              targetHigh: est.targetHigh ?? null,
+              numAnalysts: est.analysts ?? null,
+            }];
+          }));
+          results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] || null; });
+          if (i + 3 < needExt.length) await new Promise(res => setTimeout(res, 400));
+        }
+        saveExtInfoCache(cache);
+        setStockExtInfo(prev => ({ ...prev, ...cache }));
+      })();
+    }
+
+    const needYtd = symbols.filter(sym => stockYtdMap[sym] === undefined);
+    if (needYtd.length > 0) {
+      (async () => {
+        const cache = loadYtdCache();
+        for (let i = 0; i < needYtd.length; i += 3) {
+          const batch = needYtd.slice(i, i + 3);
+          const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchQuoteYTD(sym, stocks.find(s => s.symbol === sym) || {})]));
+          results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] ?? null; });
+          if (i + 3 < needYtd.length) await new Promise(res => setTimeout(res, 400));
+        }
+        saveYtdCache(cache);
+        setStockYtdMap(prev => ({ ...prev, ...cache }));
+      })();
+    }
+  }, [stocks.map(s => s.symbol).sort().join(",")]);
+
   const refreshPrices = useCallback(async () => {
     if (stocks.length === 0) return;
     setRefreshing(true);
@@ -1719,15 +1780,34 @@ function DashboardInner() {
                                           // Show warning if prices have been loaded but this stock has none
                                           const pricesLoaded = Object.keys(prices).length > 0 && !refreshing;
                                           const noPriceWarning = pricesLoaded && !hasLivePrice;
+                                          const rowExt = stockExtInfo[stock.symbol];
+                                          const rowYtd = stockYtdMap[stock.symbol] ?? null;
+                                          const rowYieldPct = q?.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100
+                                                             : q?.divYield != null ? q.divYield * 100
+                                                             : null;
                                           return (
                                             <div key={stock.id} className="ml-6 border-l border-gray-100">
                                               <div className={cn("flex items-center justify-between py-2.5 px-4 hover:bg-gray-50 cursor-pointer", noPriceWarning && "bg-amber-50/40")} onClick={() => toggleStock(stock)}>
                                                 <div className="flex items-center gap-2.5 min-w-0">
                                                   <StockLogo symbol={stock.symbol} name={stock.name} size={34} />
                                                   <div className="min-w-0">
-                                                    <div className="font-semibold text-sm text-gray-900 flex items-center gap-1.5">
+                                                    <div className="font-semibold text-sm text-gray-900 flex items-center gap-1.5 flex-wrap">
                                                       {stock.symbol}
                                                       <span className="text-xs font-normal text-gray-400">{stock.market || "US"}</span>
+                                                      {rowYieldPct != null && rowYieldPct > 0 && (
+                                                        <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
+                                                          {rowYieldPct.toFixed(2)}% yield
+                                                        </span>
+                                                      )}
+                                                      {rowExt?.sector && (
+                                                        <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{rowExt.sector}</span>
+                                                      )}
+                                                      {rowYtd != null && (
+                                                        <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border",
+                                                          rowYtd >= 0 ? "text-green-700 bg-green-50 border-green-200" : "text-red-700 bg-red-50 border-red-200")}>
+                                                          {rowYtd >= 0 ? "+" : ""}{rowYtd.toFixed(1)}% YTD
+                                                        </span>
+                                                      )}
                                                       {noPriceWarning && (
                                                         <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200" title={`No live price found for ${stock.symbol}. Check the ticker symbol or exchange.`}>
                                                           ? no live data
@@ -1758,6 +1838,16 @@ function DashboardInner() {
                                                   </div>
                                                   {isExp ? <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" /> : <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />}
                                                 </div>
+                                              </div>
+                                              <div className="px-4 pb-2">
+                                                <RangeBar low={q?.fiftyTwoWeekLow ?? q?.week52Low} high={q?.fiftyTwoWeekHigh ?? q?.week52High} current={q?.price}
+                                                  label="52-week range"
+                                                  gradientClass="bg-gradient-to-r from-red-300 via-yellow-200 to-green-400"
+                                                  markerClass="bg-blue-500" />
+                                                <RangeBar low={rowExt?.targetLow} high={rowExt?.targetHigh} current={q?.price}
+                                                  label={`12-month forecast${rowExt?.numAnalysts ? ` (${rowExt.numAnalysts} analysts)` : ""}`}
+                                                  gradientClass="bg-gradient-to-r from-orange-200 via-blue-200 to-purple-300"
+                                                  markerClass="bg-indigo-600" />
                                               </div>
                                               {isExp && (<div className="pb-3 px-4"><StockDetailPanel stock={stock} quote={q} onClose={() => setExpandedStock(null)} /></div>)}
                                             </div>

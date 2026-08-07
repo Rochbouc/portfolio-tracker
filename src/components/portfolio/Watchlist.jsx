@@ -8,6 +8,8 @@ import { cloudSetValue } from "@/api/localData"
 import { useToast } from "@/components/ui/toast"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 import { cn } from "@/lib/utils"
+import RangeBar from "./RangeBar"
+import { ensureAnalystEstimate } from "@/api/analystEstimate"
 
 const STORAGE_KEY    = "watchlist_items"        // legacy flat single-list format, read once for migration
 const WATCHLISTS_KEY = "watchlists_v1"          // current format: [{ id, name, items:[{symbol,description}] }]
@@ -19,63 +21,31 @@ function load(key)    { try { return JSON.parse(localStorage.getItem(key) || "[]
 function loadObj(key) { try { return JSON.parse(localStorage.getItem(key) || "{}") } catch { return {} } }
 function save(key, d) { localStorage.setItem(key, JSON.stringify(d)) }
 
-// Small horizontal range bar — used for both the 52-week price range and the
-// analyst price target range, with a marker showing where the current price
-// sits within that range.
-function RangeBar({ low, high, current, label, gradientClass, markerClass }) {
-  if (low == null || high == null || high <= low || current == null) return null
-  const pct = Math.min(100, Math.max(0, ((current - low) / (high - low)) * 100))
-  return (
-    <div className="mt-1.5">
-      <div className="flex justify-between text-[10px] text-gray-400 mb-0.5">
-        <span>${low.toFixed(2)}</span>
-        <span className="text-gray-400">{label}</span>
-        <span>${high.toFixed(2)}</span>
-      </div>
-      <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div className={cn("absolute inset-0 rounded-full opacity-50", gradientClass)} />
-        <div className={cn("absolute top-0 bottom-0 w-1.5 rounded-full shadow-sm", markerClass)}
-          style={{ left: `calc(${pct}% - 3px)` }} />
-      </div>
-    </div>
-  )
-}
 
 function genListId() { return "wl_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
 
-const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v1"
+const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v2"  // v2: switched from broken Yahoo quoteSummary to Groq-based estimate
 function loadExtInfoCache() { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}") } catch { return {} } }
 function saveExtInfoCache(c) { localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c)) }
 
-// Fetches sector/category AND analyst price target range in one request per
-// symbol (combined modules, instead of separate calls, to keep total proxy
-// request volume down). Fields come back null gracefully — ETFs and many
-// smaller/illiquid tickers have no analyst coverage, which is normal.
-async function fetchExtendedInfo(symbol, stock = {}) {
-  try {
-    const { toYahooTicker } = await import("@/api/tickerUtils")
-    const yahooTicker = toYahooTicker(symbol, stock)
-    const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
-    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooTicker)}?modules=assetProfile,fundProfile,financialData`
-    for (const proxy of proxies) {
-      try {
-        const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) })
-        if (!res.ok) continue
-        const data = await res.json()
-        const result = data?.quoteSummary?.result?.[0]
-        const sector = result?.assetProfile?.sector || result?.fundProfile?.categoryName || null
-        const fd = result?.financialData
-        return {
-          sector,
-          targetLow:   fd?.targetLowPrice?.raw  ?? null,
-          targetHigh:  fd?.targetHighPrice?.raw ?? null,
-          targetMean:  fd?.targetMeanPrice?.raw ?? null,
-          numAnalysts: fd?.numberOfAnalystOpinions?.raw ?? null,
-        }
-      } catch { /* try next proxy */ }
-    }
-  } catch {}
-  return null
+// Sector + analyst target range via the shared Groq-based estimate (see
+// api/analystEstimate.js) — Yahoo's live analyst-target endpoint needs an
+// auth cookie a public CORS proxy can't provide, so this reuses the same
+// approach the stock detail panel already uses successfully. Needs a Groq
+// key set; without one this returns null and the badges/bar just don't show.
+async function fetchExtendedInfo(symbol, stock = {}, quote = {}) {
+  const est = await ensureAnalystEstimate(
+    symbol, stock.name || quote.shortName || symbol, quote.price,
+    quote.fiftyTwoWeekLow, quote.fiftyTwoWeekHigh, null, quote.currency || stock.currency
+  )
+  if (!est) return null
+  return {
+    sector: stock.sector || est.sector || null,   // the stock's own stored sector wins if set
+    targetLow:  est.targetLow  ?? null,
+    targetHigh: est.targetHigh ?? null,
+    targetMean: est.targetAvg  ?? null,
+    numAnalysts: est.analysts ?? null,
+  }
 }
 
 // Fetches quotes in small staggered batches instead of all at once — firing
@@ -415,14 +385,21 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   // Fetches sector + analyst target range for any symbols not already
   // cached, in small staggered batches. Shared by the manual watchlist and
   // the auto-generated holdings section below, so a symbol appearing in
-  // both only gets fetched once.
-  async function ensureExtInfo(symbolList) {
+  // both only gets fetched once. getContext resolves per-symbol stock
+  // record (for its own stored sector) + quote (price/52-week, needed as
+  // input for the Groq estimate) — callers pass this since the two
+  // sections pull quotes from different places (this file's own `quotes`
+  // state vs. the `prices` prop from the portfolio).
+  async function ensureExtInfo(symbolList, getContext = sym => ({ stock: {}, quote: quotes[sym] || {} })) {
     const need = [...new Set(symbolList)].filter(sym => extInfo[sym] === undefined && loadExtInfoCache()[sym] === undefined)
     if (need.length === 0) return
     const cache = loadExtInfoCache()
     for (let i = 0; i < need.length; i += 3) {
       const batch = need.slice(i, i + 3)
-      const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchExtendedInfo(sym, {})]))
+      const results = await Promise.allSettled(batch.map(async sym => {
+        const { stock, quote } = getContext(sym)
+        return [sym, await fetchExtendedInfo(sym, stock, quote)]
+      }))
       results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] || null })
       if (i + 3 < need.length) await new Promise(res => setTimeout(res, 400))
     }
@@ -449,7 +426,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
       // showing its last-known value instead of flashing to "—".
       setQuotes(prev => ({ ...prev, ...map }))
 
-      ensureExtInfo(symbolList)  // sector + analyst target, cached, fire-and-forget
+      ensureExtInfo(symbolList, sym => ({ stock: {}, quote: map[sym] || {} }))  // sector + analyst target, cached, fire-and-forget
 
       if (!silentAlerts) {
         // Check each alert
@@ -526,7 +503,10 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   useEffect(() => {
     const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))]
     if (symbols.length === 0) return
-    ensureExtInfo(symbols)
+    ensureExtInfo(symbols, sym => ({
+      stock: stocks.find(s => s.symbol === sym) || {},
+      quote: prices[sym] || {},
+    }))
     // YTD % isn't in the `prices` prop (Dashboard fetches 1-day quotes for
     // that), so fetch it here for any holdings not already covered by the
     // manual watchlist's own quote fetch above.

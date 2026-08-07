@@ -122,6 +122,23 @@ export async function fetchQuote(symbol, stock = {}) {
   }
 }
 
+// Same as fetchQuote, but requests a year-to-date range so YTD % return can
+// be computed from the same response — no extra request needed just for
+// that one number. Shared by the watchlist and the main holdings list.
+export async function fetchQuoteYTD(symbol, stock = {}) {
+  const yahooTicker = toYahooTicker(symbol, stock)
+  const data = await proxyFetch(
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=ytd`
+  )
+  const result = data?.chart?.result?.[0]
+  const meta = result?.meta
+  if (!meta) return null
+  const cur = meta.regularMarketPrice ?? null
+  const closes = result?.indicators?.quote?.[0]?.close || []
+  const firstClose = closes.find(c => c != null)
+  return firstClose && cur != null ? ((cur - firstClose) / firstClose) * 100 : null
+}
+
 export async function fetchChartData(symbol, range = "1M", stock = {}) {
   const yahooTicker = toYahooTicker(symbol, stock)
   const rangeMap = { "1D":"1d","1W":"5d","1M":"1mo","3M":"3mo","1Y":"1y","5Y":"5y" }
