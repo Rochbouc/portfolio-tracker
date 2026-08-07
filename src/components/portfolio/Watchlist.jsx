@@ -19,7 +19,83 @@ function load(key)    { try { return JSON.parse(localStorage.getItem(key) || "[]
 function loadObj(key) { try { return JSON.parse(localStorage.getItem(key) || "{}") } catch { return {} } }
 function save(key, d) { localStorage.setItem(key, JSON.stringify(d)) }
 
+// Small horizontal range bar — used for both the 52-week price range and the
+// analyst price target range, with a marker showing where the current price
+// sits within that range.
+function RangeBar({ low, high, current, label, gradientClass, markerClass }) {
+  if (low == null || high == null || high <= low || current == null) return null
+  const pct = Math.min(100, Math.max(0, ((current - low) / (high - low)) * 100))
+  return (
+    <div className="mt-1.5">
+      <div className="flex justify-between text-[10px] text-gray-400 mb-0.5">
+        <span>${low.toFixed(2)}</span>
+        <span className="text-gray-400">{label}</span>
+        <span>${high.toFixed(2)}</span>
+      </div>
+      <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div className={cn("absolute inset-0 rounded-full opacity-50", gradientClass)} />
+        <div className={cn("absolute top-0 bottom-0 w-1.5 rounded-full shadow-sm", markerClass)}
+          style={{ left: `calc(${pct}% - 3px)` }} />
+      </div>
+    </div>
+  )
+}
+
 function genListId() { return "wl_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
+
+const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v1"
+function loadExtInfoCache() { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}") } catch { return {} } }
+function saveExtInfoCache(c) { localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c)) }
+
+// Fetches sector/category AND analyst price target range in one request per
+// symbol (combined modules, instead of separate calls, to keep total proxy
+// request volume down). Fields come back null gracefully — ETFs and many
+// smaller/illiquid tickers have no analyst coverage, which is normal.
+async function fetchExtendedInfo(symbol, stock = {}) {
+  try {
+    const { toYahooTicker } = await import("@/api/tickerUtils")
+    const yahooTicker = toYahooTicker(symbol, stock)
+    const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooTicker)}?modules=assetProfile,fundProfile,financialData`
+    for (const proxy of proxies) {
+      try {
+        const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) })
+        if (!res.ok) continue
+        const data = await res.json()
+        const result = data?.quoteSummary?.result?.[0]
+        const sector = result?.assetProfile?.sector || result?.fundProfile?.categoryName || null
+        const fd = result?.financialData
+        return {
+          sector,
+          targetLow:   fd?.targetLowPrice?.raw  ?? null,
+          targetHigh:  fd?.targetHighPrice?.raw ?? null,
+          targetMean:  fd?.targetMeanPrice?.raw ?? null,
+          numAnalysts: fd?.numberOfAnalystOpinions?.raw ?? null,
+        }
+      } catch { /* try next proxy */ }
+    }
+  } catch {}
+  return null
+}
+
+// Fetches quotes in small staggered batches instead of all at once — firing
+// 8-10+ simultaneous requests at a free CORS proxy reliably gets a chunk of
+// them silently rate-limited (they come back null and never retry until the
+// next 60s cycle repeats the same failure), which is why some watchlist
+// rows can end up permanently stuck showing "—" with no price/52-week range.
+async function fetchQuotesBatched(symbolList, batchSize = 3, delayMs = 400) {
+  const map = {}
+  for (let i = 0; i < symbolList.length; i += batchSize) {
+    const batch = symbolList.slice(i, i + batchSize)
+    const results = await Promise.allSettled(batch.map(async sym => {
+      const q = await fetchQuote(sym, {})
+      return [sym, q]
+    }))
+    results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) map[r.value[0]] = r.value[1] })
+    if (i + batchSize < symbolList.length) await new Promise(res => setTimeout(res, delayMs))
+  }
+  return map
+}
 
 // Loads the current multi-watchlist structure, migrating the old flat
 // single-list format (array of symbol strings) into it the first time this
@@ -293,18 +369,46 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   }
   function saveFired(obj)   { save(FIRED_KEY,   obj);  setFired(obj) }
 
+  const [extInfo, setExtInfo] = useState(() => loadExtInfoCache())
+
+  // Fetches sector + analyst target range for any symbols not already
+  // cached, in small staggered batches. Shared by the manual watchlist and
+  // the auto-generated holdings section below, so a symbol appearing in
+  // both only gets fetched once.
+  async function ensureExtInfo(symbolList) {
+    const need = [...new Set(symbolList)].filter(sym => extInfo[sym] === undefined && loadExtInfoCache()[sym] === undefined)
+    if (need.length === 0) return
+    const cache = loadExtInfoCache()
+    for (let i = 0; i < need.length; i += 3) {
+      const batch = need.slice(i, i + 3)
+      const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchExtendedInfo(sym, {})]))
+      results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] || null })
+      if (i + 3 < need.length) await new Promise(res => setTimeout(res, 400))
+    }
+    saveExtInfoCache(cache)
+    setExtInfo(prev => ({ ...prev, ...cache }))
+  }
+
   // ── Fetch prices + check alerts ─────────────────────────────────
   async function fetchAll(symbolList = items.map(i => i.symbol), silentAlerts = false) {
     if (symbolList.length === 0) return
     setLoading(true)
     try {
-      const entries = await Promise.allSettled(symbolList.map(async sym => {
-        const q = await fetchQuote(sym, {})
-        return [sym, q]
-      }))
-      const map = {}
-      entries.forEach(r => { if (r.status === "fulfilled" && r.value[1]) map[r.value[0]] = r.value[1] })
-      setQuotes(map)
+      let map = await fetchQuotesBatched(symbolList)
+      // Retry anything that came back empty once, after a short pause —
+      // recovers most transient CORS-proxy rate-limit misses instead of
+      // leaving a row stuck at "—" until the next 60s refresh cycle.
+      const missing = symbolList.filter(sym => !map[sym])
+      if (missing.length > 0) {
+        await new Promise(res => setTimeout(res, 800))
+        const retryMap = await fetchQuotesBatched(missing)
+        map = { ...map, ...retryMap }
+      }
+      // Merge rather than replace — a quote that fails this cycle keeps
+      // showing its last-known value instead of flashing to "—".
+      setQuotes(prev => ({ ...prev, ...map }))
+
+      ensureExtInfo(symbolList)  // sector + analyst target, cached, fire-and-forget
 
       if (!silentAlerts) {
         // Check each alert
@@ -359,6 +463,29 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
 
   // Re-check when alerts change
   useEffect(() => { if (quotes && Object.keys(quotes).length > 0) fetchAll() }, [alerts.length])
+
+  // ── Auto-updating "My Holdings" watchlist ───────────────────────
+  // Grouped by account, then by currency within each account. Live prices
+  // and 52-week range come from the `prices` prop (already fetched
+  // elsewhere for the portfolio — no extra requests needed here). Sector +
+  // analyst target still need the same cached quoteSummary fetch used above.
+  const holdingsGrouped = useMemo(() => {
+    const groups = {}
+    stocks.forEach(s => {
+      if (!s.symbol || !(s.shares > 0)) return
+      const acct = s.account_type || "Other"
+      const cur  = s.currency || "USD"
+      if (!groups[acct]) groups[acct] = {}
+      if (!groups[acct][cur]) groups[acct][cur] = []
+      groups[acct][cur].push(s)
+    })
+    return groups
+  }, [stocks])
+
+  useEffect(() => {
+    const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))]
+    if (symbols.length > 0) ensureExtInfo(symbols)
+  }, [stocks.map(s => s.symbol).sort().join(",")])
 
   // ── Search ────────────────────────────────────────────────────
   useEffect(() => {
@@ -612,6 +739,91 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
         </div>
       )}
 
+      {/* Auto-updating: My Holdings, grouped by account then currency */}
+      <Card className="bg-white">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Eye className="h-4 w-4 text-emerald-500" /> My Holdings
+            <span className="text-[10px] font-normal text-gray-400">auto-updates from your portfolio</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {Object.keys(holdingsGrouped).length === 0 ? (
+            <div className="text-center py-6 text-gray-400 text-xs">No holdings yet — add stocks in the Portfolio tab.</div>
+          ) : (
+            Object.entries(holdingsGrouped).sort(([a],[b]) => a.localeCompare(b)).map(([account, byCurrency]) => (
+              <div key={account}>
+                <div className="px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 border-y border-gray-200">{account}</div>
+                {Object.entries(byCurrency).sort(([a],[b]) => a.localeCompare(b)).map(([currency, list]) => (
+                  <div key={currency}>
+                    <div className="px-3 py-1 text-[11px] font-medium text-gray-400">{currency} · {list.length} holding{list.length !== 1 ? "s" : ""}</div>
+                    <div className="divide-y">
+                      {list.map(s => {
+                        const q   = prices[s.symbol]
+                        const chg = q?.changePercent ?? null
+                        const pos = chg != null && chg >= 0
+                        const ext = extInfo[s.symbol]
+                        const yieldPct = q?.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100
+                                       : q?.divYield != null ? q.divYield * 100
+                                       : null
+                        return (
+                          <div key={s.id} className="px-3 py-2.5 hover:bg-gray-50 transition-colors">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <StockLogoButton symbol={s.symbol} name={s.name || s.symbol} size={32}
+                                  stock={s} quote={q} />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-sm text-gray-900">{s.symbol}</span>
+                                    <span className="text-[11px] text-gray-400">{s.shares} sh</span>
+                                  </div>
+                                  {(ext?.sector || (yieldPct != null && yieldPct > 0)) && (
+                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                      {ext?.sector && (
+                                        <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{ext.sector}</span>
+                                      )}
+                                      {yieldPct != null && yieldPct > 0 && (
+                                        <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
+                                          {yieldPct.toFixed(2)}% yield
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                {q ? (
+                                  <>
+                                    <div className="font-semibold text-sm text-gray-900">{fmt(q.price, q.currency)}</div>
+                                    <div className={cn("text-xs font-medium flex items-center justify-end gap-0.5",
+                                      pos ? "text-green-600" : "text-red-500")}>
+                                      {pos ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                      {pos ? "+" : ""}{chg != null ? chg.toFixed(2) : "0.00"}%
+                                    </div>
+                                  </>
+                                ) : <div className="text-xs text-gray-300">—</div>}
+                              </div>
+                            </div>
+                            <RangeBar low={q?.fiftyTwoWeekLow} high={q?.fiftyTwoWeekHigh} current={q?.price}
+                              label="52-week range"
+                              gradientClass="bg-gradient-to-r from-red-300 via-yellow-200 to-green-400"
+                              markerClass="bg-blue-500" />
+                            <RangeBar low={ext?.targetLow} high={ext?.targetHigh} current={q?.price}
+                              label={`Analyst target${ext?.numAnalysts ? ` (${ext.numAnalysts})` : ""}`}
+                              gradientClass="bg-gradient-to-r from-orange-200 via-blue-200 to-purple-300"
+                              markerClass="bg-indigo-600" />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
       {/* Existing Watchlist */}
       <Card className="bg-white">
       <CardHeader className="pb-2">
@@ -755,6 +967,10 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
               const pos      = chg != null && chg >= 0
               const symAlerts = alerts.filter(a => a.symbol === sym)
               const anyHit   = symAlerts.some(a => !!fired[a.id])
+              const yieldPct = q?.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100
+                              : q?.divYield != null ? q.divYield * 100
+                              : null
+              const sector   = extInfo[sym]?.sector
 
               return (
                 <div key={sym} className={cn("px-3 py-2.5 hover:bg-gray-50 transition-colors",
@@ -773,6 +989,20 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                         {symAlerts.length > 0 && !anyHit && <Bell className="h-3 w-3 text-gray-300" />}
                         {q?.shortName && <span className="text-[11px] text-gray-400 truncate max-w-[120px]">{q.shortName}</span>}
                       </div>
+
+                      {/* Sector + dividend yield */}
+                      {(sector || yieldPct != null) && (
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          {sector && (
+                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{sector}</span>
+                          )}
+                          {yieldPct != null && yieldPct > 0 && (
+                            <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
+                              {yieldPct.toFixed(2)}% yield
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Alert chips */}
                       {symAlerts.length > 0 && (
@@ -888,20 +1118,16 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                   )}
 
                   {/* 52-week range */}
-                  {q?.fiftyTwoWeekLow != null && q?.fiftyTwoWeekHigh != null && (
-                    <div className="mt-1.5">
-                      <div className="flex justify-between text-[10px] text-gray-400 mb-0.5">
-                        <span>${q.fiftyTwoWeekLow.toFixed(2)}</span>
-                        <span className="text-gray-400">52-week range</span>
-                        <span>${q.fiftyTwoWeekHigh.toFixed(2)}</span>
-                      </div>
-                      <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-red-300 via-yellow-200 to-green-400 opacity-50" />
-                        <div className="absolute top-0 bottom-0 w-1.5 bg-blue-500 rounded-full shadow-sm"
-                          style={{ left: `calc(${Math.min(100, Math.max(0, ((q.price - q.fiftyTwoWeekLow) / (q.fiftyTwoWeekHigh - q.fiftyTwoWeekLow)) * 100))}% - 3px)` }} />
-                      </div>
-                    </div>
-                  )}
+                  <RangeBar low={q?.fiftyTwoWeekLow} high={q?.fiftyTwoWeekHigh} current={q?.price}
+                    label="52-week range"
+                    gradientClass="bg-gradient-to-r from-red-300 via-yellow-200 to-green-400"
+                    markerClass="bg-blue-500" />
+
+                  {/* Analyst price target range */}
+                  <RangeBar low={extInfo[sym]?.targetLow} high={extInfo[sym]?.targetHigh} current={q?.price}
+                    label={`Analyst target${extInfo[sym]?.numAnalysts ? ` (${extInfo[sym].numAnalysts})` : ""}`}
+                    gradientClass="bg-gradient-to-r from-orange-200 via-blue-200 to-purple-300"
+                    markerClass="bg-indigo-600" />
                 </div>
               )
             })}
