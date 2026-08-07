@@ -3,7 +3,7 @@ import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Eye, Trash2, RefreshCw, TrendingUp, TrendingDown, Bell, BellOff, X, BellRing, Plus, Pencil, StickyNote, Check } from "lucide-react"
-import { fetchQuote, searchTickers } from "@/api/stockSearch"
+import { searchTickers } from "@/api/stockSearch"
 import { cloudSetValue } from "@/api/localData"
 import { useToast } from "@/components/ui/toast"
 import { StockLogoButton } from "@/components/ui/StockPopup"
@@ -83,12 +83,53 @@ async function fetchExtendedInfo(symbol, stock = {}) {
 // them silently rate-limited (they come back null and never retry until the
 // next 60s cycle repeats the same failure), which is why some watchlist
 // rows can end up permanently stuck showing "—" with no price/52-week range.
+// Same shape as api/stockSearch's fetchQuote, but requests a year-to-date
+// range instead of 1 day so YTD % return can be computed from the same
+// response — no extra proxy request needed just for that one number.
+async function fetchQuoteWithYTD(symbol) {
+  try {
+    const { toYahooTicker } = await import("@/api/tickerUtils")
+    const yahooTicker = toYahooTicker(symbol, {})
+    const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=ytd`
+    for (const proxy of proxies) {
+      try {
+        const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) })
+        if (!res.ok) continue
+        const data = await res.json()
+        const result = data?.chart?.result?.[0]
+        const meta = result?.meta
+        if (!meta) continue
+        const cur  = meta.regularMarketPrice ?? null
+        const prev = meta.chartPreviousClose ?? meta.previousClose ?? null
+        const closes = result?.indicators?.quote?.[0]?.close || []
+        const firstClose = closes.find(c => c != null)
+        const ytdPct = firstClose && cur != null ? ((cur - firstClose) / firstClose) * 100 : null
+        return {
+          price: cur, previousClose: prev,
+          change: cur != null && prev != null ? cur - prev : null,
+          changePercent: cur != null && prev != null ? ((cur - prev) / prev) * 100 : null,
+          currency: meta.currency ?? "USD",
+          shortName: meta.shortName ?? symbol,
+          fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null,
+          fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
+          dividendYield: meta.dividendYield ?? null,
+          trailingAnnualDividendYield: meta.trailingAnnualDividendYield ?? null,
+          divYield: meta.dividendYield ?? null,
+          ytdPct,
+        }
+      } catch { /* try next proxy */ }
+    }
+  } catch {}
+  return null
+}
+
 async function fetchQuotesBatched(symbolList, batchSize = 3, delayMs = 400) {
   const map = {}
   for (let i = 0; i < symbolList.length; i += batchSize) {
     const batch = symbolList.slice(i, i + batchSize)
     const results = await Promise.allSettled(batch.map(async sym => {
-      const q = await fetchQuote(sym, {})
+      const q = await fetchQuoteWithYTD(sym)
       return [sym, q]
     }))
     results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) map[r.value[0]] = r.value[1] })
@@ -484,7 +525,15 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
 
   useEffect(() => {
     const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))]
-    if (symbols.length > 0) ensureExtInfo(symbols)
+    if (symbols.length === 0) return
+    ensureExtInfo(symbols)
+    // YTD % isn't in the `prices` prop (Dashboard fetches 1-day quotes for
+    // that), so fetch it here for any holdings not already covered by the
+    // manual watchlist's own quote fetch above.
+    const missing = symbols.filter(sym => quotes[sym]?.ytdPct === undefined)
+    if (missing.length > 0) {
+      fetchQuotesBatched(missing).then(map => setQuotes(prev => ({ ...prev, ...map })))
+    }
   }, [stocks.map(s => s.symbol).sort().join(",")])
 
   // ── Search ────────────────────────────────────────────────────
@@ -766,6 +815,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                         const yieldPct = q?.trailingAnnualDividendYield != null ? q.trailingAnnualDividendYield * 100
                                        : q?.divYield != null ? q.divYield * 100
                                        : null
+                        const ytdPct = quotes[s.symbol]?.ytdPct ?? null
                         return (
                           <div key={s.id} className="px-3 py-2.5 hover:bg-gray-50 transition-colors">
                             <div className="flex items-center justify-between gap-2">
@@ -782,6 +832,12 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                                     )}
                                     {ext?.sector && (
                                       <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{ext.sector}</span>
+                                    )}
+                                    {ytdPct != null && (
+                                      <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border",
+                                        ytdPct >= 0 ? "text-green-700 bg-green-50 border-green-200" : "text-red-700 bg-red-50 border-red-200")}>
+                                        {ytdPct >= 0 ? "+" : ""}{ytdPct.toFixed(1)}% YTD
+                                      </span>
                                     )}
                                   </div>
                                   <div className="text-[11px] text-gray-400">{s.shares} sh</div>
@@ -967,6 +1023,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                               : q?.divYield != null ? q.divYield * 100
                               : null
               const sector   = extInfo[sym]?.sector
+              const ytdPct   = q?.ytdPct ?? null
 
               return (
                 <div key={sym} className={cn("px-3 py-2.5 hover:bg-gray-50 transition-colors",
@@ -988,6 +1045,12 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                         )}
                         {sector && (
                           <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{sector}</span>
+                        )}
+                        {ytdPct != null && (
+                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium border",
+                            ytdPct >= 0 ? "text-green-700 bg-green-50 border-green-200" : "text-red-700 bg-red-50 border-red-200")}>
+                            {ytdPct >= 0 ? "+" : ""}{ytdPct.toFixed(1)}% YTD
+                          </span>
                         )}
                         {anyHit && <BellRing className="h-3.5 w-3.5 text-yellow-500 animate-pulse" />}
                         {symAlerts.length > 0 && !anyHit && <Bell className="h-3 w-3 text-gray-300" />}
