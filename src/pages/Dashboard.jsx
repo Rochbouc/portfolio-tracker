@@ -1181,7 +1181,7 @@ function DashboardInner() {
     s + toGlobalCurrency((parseFloat(st.annual_dividend) || 0) * (st.shares || 0), st.currency || "USD"), 0);
 
   // ── Pending dividend suggestions ──────────────────────────────────
-  // Finds stocks with a payment due in the past 14 days not yet recorded
+  // Finds stocks with a payment due in the past 35 days not yet recorded
   const pendingDividendSuggestions = useMemo(() => {
     const today = new Date();
     const suggestions = [];
@@ -1199,11 +1199,14 @@ function DashboardInner() {
       const perPayment = annualDiv / freq;
       if (perPayment <= 0) return;
 
-      // For each day from tomorrow back through the past 14 days, check if a
+      // For each day from tomorrow back through the past 35 days, check if a
       // payment was/is expected. Starting one day ahead (daysAgo = -1) means
       // the suggestion shows up the day before the actual pay date, so it's
-      // ready to enter as soon as the dividend posts.
-      for (let daysAgo = -1; daysAgo <= 14; daysAgo++) {
+      // ready to enter as soon as the dividend posts. The 35-day lookback
+      // (rather than 14) ensures a monthly payer's suggestion doesn't age out
+      // and disappear before you get a chance to check the app and record it —
+      // 14 days left a real gap for anyone who doesn't open the app weekly.
+      for (let daysAgo = -1; daysAgo <= 35; daysAgo++) {
         const checkDate = new Date(today);
         checkDate.setDate(checkDate.getDate() - daysAgo);
         const dateStr  = checkDate.toISOString().slice(0,10);

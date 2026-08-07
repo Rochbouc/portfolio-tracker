@@ -228,7 +228,7 @@ const KNOWN_DIVIDENDS = {
   "BMO":   { rate: 5.84,  freq: 4,  currency: "CAD", payDay: 26, payMonths: [2,5,8,11] },
   "CU":    { rate: 1.78,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [1,4,7,10] },
   "BN":    { rate: 0.76,  freq: 4,  currency: "CAD", payDay: 28, payMonths: [3,6,9,12] },
-  "DOL":   { rate: 0.92,  freq: 4,  currency: "CAD", payDay:  5, payMonths: [2,5,8,11] },
+  "DOL":   { rate: 0.48,  freq: 4,  currency: "CAD", payDay:  7, payMonths: [2,5,8,11] },  // Dollarama — recent pays land on the 7th-9th, not the 5th; rate was stale at $0.92 vs actual $0.48/yr
   "VFV":   { rate: 2.40,  freq: 12, currency: "CAD", payDay: 25 },
   "XIC":   { rate: 0.80,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~30th
   "XEQT":  { rate: 1.20,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~30th
