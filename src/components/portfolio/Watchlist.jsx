@@ -2,20 +2,43 @@ import { useState, useEffect, useRef, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Eye, Trash2, RefreshCw, TrendingUp, TrendingDown, Bell, BellOff, X, BellRing } from "lucide-react"
+import { Eye, Trash2, RefreshCw, TrendingUp, TrendingDown, Bell, BellOff, X, BellRing, Plus, Pencil, StickyNote, Check } from "lucide-react"
 import { fetchQuote, searchTickers } from "@/api/stockSearch"
 import { cloudSetValue } from "@/api/localData"
 import { useToast } from "@/components/ui/toast"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 import { cn } from "@/lib/utils"
 
-const STORAGE_KEY = "watchlist_items"
+const STORAGE_KEY    = "watchlist_items"        // legacy flat single-list format, read once for migration
+const WATCHLISTS_KEY = "watchlists_v1"          // current format: [{ id, name, items:[{symbol,description}] }]
+const ACTIVE_KEY     = "watchlist_active_id_v1" // which watchlist tab is selected — device-local, like tab order
 const ALERTS_KEY  = "price_alerts"   // same key as sidebar PriceAlertsPanel
 const FIRED_KEY   = "watchlist_alerts_fired"   // track which alerts have already notified
 
 function load(key)    { try { return JSON.parse(localStorage.getItem(key) || "[]") } catch { return [] } }
 function loadObj(key) { try { return JSON.parse(localStorage.getItem(key) || "{}") } catch { return {} } }
 function save(key, d) { localStorage.setItem(key, JSON.stringify(d)) }
+
+function genListId() { return "wl_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
+
+// Loads the current multi-watchlist structure, migrating the old flat
+// single-list format (array of symbol strings) into it the first time this
+// runs. Always returns at least one watchlist.
+function loadWatchlists() {
+  try {
+    const raw = localStorage.getItem(WATCHLISTS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed
+    }
+  } catch {}
+  const legacy = load(STORAGE_KEY) // array of symbol strings from the old format
+  return [{
+    id: "wl_default",
+    name: "My Watchlist",
+    items: legacy.map(sym => ({ symbol: sym, description: "" })),
+  }]
+}
 
 function fmt(n, cur = "USD") {
   if (n == null) return "—"
@@ -198,7 +221,12 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   const fmtD = (n) => new Intl.NumberFormat("en-CA",{style:"currency",currency:globalCurrency,maximumFractionDigits:0}).format(n||0)
 
   const { toast } = useToast()
-  const [items,    setItems]    = useState(() => load(STORAGE_KEY))
+  const [watchlists,   setWatchlists]   = useState(() => loadWatchlists())
+  const [activeListId, setActiveListId] = useState(() => {
+    const saved = localStorage.getItem(ACTIVE_KEY)
+    const lists = loadWatchlists()
+    return (saved && lists.some(w => w.id === saved)) ? saved : lists[0].id
+  })
   const [alerts,   setAlerts]   = useState(() => load(ALERTS_KEY))
   const [fired,    setFired]    = useState(() => loadObj(FIRED_KEY))   // { alertId: true }
   const [quotes,   setQuotes]   = useState({})
@@ -208,13 +236,53 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   const [searching,setSearching]= useState(false)
   const [alertForm,setAlertForm]= useState(null)
   const [notifPerm,setNotifPerm]= useState(() => "Notification" in window ? Notification.permission : "denied")
+  const [newListName, setNewListName]   = useState(null)  // non-null while the "new watchlist" input is open
+  const [renamingList, setRenamingList] = useState(null)  // list id currently being renamed
+  const [renameValue, setRenameValue]   = useState("")
+  const [descEditing, setDescEditing]   = useState(null)  // symbol currently being described
+  const [descValue, setDescValue]       = useState("")
   const alertsRef = useRef(alerts)
   alertsRef.current = alerts
 
-  function saveItems(list)  {
-    save(STORAGE_KEY, list)
-    setItems(list)
-    cloudSetValue(STORAGE_KEY, list)   // push to Firestore, cross-device sync
+  const activeList = watchlists.find(w => w.id === activeListId) || watchlists[0]
+  const items = activeList?.items || []  // [{ symbol, description }]
+
+  function saveWatchlists(next) {
+    save(WATCHLISTS_KEY, next)
+    setWatchlists(next)
+    cloudSetValue(WATCHLISTS_KEY, next)   // push to Firestore, cross-device sync
+  }
+  function updateActiveItems(updater) {
+    const next = watchlists.map(w => w.id === activeList.id ? { ...w, items: updater(w.items) } : w)
+    saveWatchlists(next)
+  }
+  function selectWatchlist(id) {
+    setActiveListId(id)
+    localStorage.setItem(ACTIVE_KEY, id)  // device-local, like tab order
+  }
+  function createWatchlist(name) {
+    const trimmed = (name || "").trim()
+    if (!trimmed) return
+    const id = genListId()
+    saveWatchlists([...watchlists, { id, name: trimmed, items: [] }])
+    selectWatchlist(id)
+    setNewListName(null)
+  }
+  function renameWatchlist(id, name) {
+    const trimmed = (name || "").trim()
+    if (!trimmed) { setRenamingList(null); return }
+    saveWatchlists(watchlists.map(w => w.id === id ? { ...w, name: trimmed } : w))
+    setRenamingList(null)
+  }
+  function deleteWatchlist(id) {
+    if (watchlists.length <= 1) return  // always keep at least one watchlist
+    const next = watchlists.filter(w => w.id !== id)
+    saveWatchlists(next)
+    if (activeListId === id) selectWatchlist(next[0].id)
+  }
+  function updateDescription(sym, description) {
+    updateActiveItems(list => list.map(i => i.symbol === sym ? { ...i, description } : i))
+    setDescEditing(null)
   }
   function saveAlerts(list) {
     localStorage.setItem(ALERTS_KEY, JSON.stringify(list))
@@ -226,11 +294,11 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   function saveFired(obj)   { save(FIRED_KEY,   obj);  setFired(obj) }
 
   // ── Fetch prices + check alerts ─────────────────────────────────
-  async function fetchAll(list = items, silentAlerts = false) {
-    if (list.length === 0) return
+  async function fetchAll(symbolList = items.map(i => i.symbol), silentAlerts = false) {
+    if (symbolList.length === 0) return
     setLoading(true)
     try {
-      const entries = await Promise.allSettled(list.map(async sym => {
+      const entries = await Promise.allSettled(symbolList.map(async sym => {
         const q = await fetchQuote(sym, {})
         return [sym, q]
       }))
@@ -284,10 +352,10 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
 
   // Auto-refresh every 60s
   useEffect(() => {
-    fetchAll(items, true)  // initial load — silent (don't re-fire old alerts)
+    fetchAll(items.map(i => i.symbol), true)  // initial load — silent (don't re-fire old alerts)
     const id = setInterval(() => fetchAll(), 60000)
     return () => clearInterval(id)
-  }, [])
+  }, [activeListId])
 
   // Re-check when alerts change
   useEffect(() => { if (quotes && Object.keys(quotes).length > 0) fetchAll() }, [alerts.length])
@@ -305,15 +373,14 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
   }, [query])
 
   function addSymbol(sym) {
-    if (items.includes(sym)) return
-    const next = [...items, sym]
-    saveItems(next)
+    if (items.some(i => i.symbol === sym)) return
+    updateActiveItems(list => [...list, { symbol: sym, description: "" }])
     setQuery(""); setResults([])
-    fetchAll(next, true)
+    fetchAll([...items.map(i => i.symbol), sym], true)
   }
 
   function removeSymbol(sym) {
-    saveItems(items.filter(s => s !== sym))
+    updateActiveItems(list => list.filter(i => i.symbol !== sym))
     const newAlerts = alerts.filter(a => a.symbol !== sym)
     saveAlerts(newAlerts)
     setQuotes(q => { const n = {...q}; delete n[sym]; return n })
@@ -550,7 +617,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Eye className="h-4 w-4 text-blue-500" /> Watchlist
+            <Eye className="h-4 w-4 text-blue-500" /> {activeList?.name || "Watchlist"}
             {triggeredAlerts.length > 0 && (
               <span className="flex items-center gap-1 text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-semibold border border-yellow-300 animate-pulse">
                 <BellRing className="h-3 w-3" /> {triggeredAlerts.length} alert{triggeredAlerts.length > 1 ? "s" : ""} hit!
@@ -575,6 +642,62 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
               <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
             </button>
           </div>
+        </div>
+
+        {/* Watchlist tabs — switch, rename, delete, create */}
+        <div className="flex items-center gap-1.5 flex-wrap mt-2">
+          {watchlists.map(w => (
+            <div key={w.id} className={cn(
+              "group flex items-center gap-1 rounded-full border pl-3 pr-1.5 py-1 text-xs transition-colors",
+              w.id === activeListId
+                ? "bg-blue-50 border-blue-300 text-blue-700 font-semibold"
+                : "bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100"
+            )}>
+              {renamingList === w.id ? (
+                <input autoFocus value={renameValue} onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") renameWatchlist(w.id, renameValue); if (e.key === "Escape") setRenamingList(null) }}
+                  onBlur={() => renameWatchlist(w.id, renameValue)}
+                  className="text-xs border-b border-blue-300 bg-transparent focus:outline-none w-24" />
+              ) : (
+                <button onClick={() => selectWatchlist(w.id)} className="whitespace-nowrap">
+                  {w.name} <span className="text-[10px] opacity-60">({w.items.length})</span>
+                </button>
+              )}
+              {w.id === activeListId && renamingList !== w.id && (
+                <>
+                  <button onClick={() => { setRenamingList(w.id); setRenameValue(w.name) }}
+                    className="opacity-40 hover:opacity-100 p-0.5" title="Rename watchlist">
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  {watchlists.length > 1 && (
+                    <button onClick={() => { if (confirm(`Delete watchlist "${w.name}"? This removes its ${w.items.length} stock(s) too.`)) deleteWatchlist(w.id) }}
+                      className="opacity-40 hover:opacity-100 hover:text-red-500 p-0.5" title="Delete watchlist">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+          {newListName !== null ? (
+            <div className="flex items-center gap-1 rounded-full border border-green-300 bg-green-50 pl-3 pr-1.5 py-1">
+              <input autoFocus value={newListName} onChange={e => setNewListName(e.target.value)}
+                placeholder="Watchlist name..."
+                onKeyDown={e => { if (e.key === "Enter") createWatchlist(newListName); if (e.key === "Escape") setNewListName(null) }}
+                className="text-xs bg-transparent focus:outline-none w-28" />
+              <button onClick={() => createWatchlist(newListName)} className="text-green-600 hover:text-green-800 p-0.5" title="Create">
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => setNewListName(null)} className="text-gray-400 hover:text-gray-600 p-0.5" title="Cancel">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setNewListName("")}
+              className="flex items-center gap-1 rounded-full border border-dashed border-gray-300 text-gray-400 hover:text-blue-600 hover:border-blue-300 px-2.5 py-1 text-xs transition-colors">
+              <Plus className="h-3 w-3" /> New watchlist
+            </button>
+          )}
         </div>
 
         {/* Triggered alerts banner */}
@@ -620,12 +743,13 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
         {items.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-gray-400">
             <Eye className="h-8 w-8 mb-2 opacity-30" />
-            <p className="text-xs">No stocks on watchlist</p>
+            <p className="text-xs">No stocks on {activeList?.name || "this watchlist"}</p>
             <p className="text-[11px] text-gray-300 mt-0.5">Search above to add stocks to watch</p>
           </div>
         ) : (
           <div className="divide-y">
-            {items.map(sym => {
+            {items.map(item => {
+              const sym      = item.symbol
               const q        = quotes[sym]
               const chg      = q?.changePercent ?? null
               const pos      = chg != null && chg >= 0
@@ -672,6 +796,28 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                           ))}
                         </div>
                       )}
+
+                      {/* Description note */}
+                      {descEditing === sym ? (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <input autoFocus value={descValue} onChange={e => setDescValue(e.target.value)}
+                            placeholder="Why is this on your watchlist?"
+                            onKeyDown={e => { if (e.key === "Enter") updateDescription(sym, descValue); if (e.key === "Escape") setDescEditing(null) }}
+                            className="text-[11px] border border-gray-300 rounded px-2 py-1 bg-white flex-1 min-w-0 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          <button onClick={() => updateDescription(sym, descValue)} className="text-green-600 hover:text-green-800 p-0.5" title="Save">
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => setDescEditing(null)} className="text-gray-400 hover:text-gray-600 p-0.5" title="Cancel">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : item.description ? (
+                        <button onClick={() => { setDescEditing(sym); setDescValue(item.description) }}
+                          className="text-[11px] text-gray-500 italic mt-1 text-left hover:text-gray-700 flex items-start gap-1">
+                          <StickyNote className="h-3 w-3 mt-0.5 shrink-0 opacity-50" />
+                          <span>{item.description}</span>
+                        </button>
+                      ) : null}
                     </div>
                     </div>
 
@@ -692,6 +838,13 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0 ml-1">
+                      {descEditing !== sym && !item.description && (
+                        <button onClick={() => { setDescEditing(sym); setDescValue("") }}
+                          className="p-1 rounded hover:bg-gray-200 text-gray-300 hover:text-gray-600 transition-colors"
+                          title="Add a note">
+                          <StickyNote className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setAlertForm(alertForm?.symbol === sym ? null : { symbol:sym, condition:"above", price:"" })}
                         className={cn("p-1 rounded hover:bg-gray-200 transition-colors",

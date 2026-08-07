@@ -153,7 +153,7 @@ export async function cloudGetValue(key) {
 }
 
 const SIMPLE_SYNCED_KEYS = [
-  "watchlist_items", "price_alerts",
+  "watchlist_items", "watchlists_v1", "price_alerts",
   "groq_api_key", "custom_account_types",
   "historical_dividends_per_stock_v2", "yoy_portfolio_history_v1",
   "proj60_accounts_v3", "proj60_settings_v1", "tfsa_tracker_v1",
