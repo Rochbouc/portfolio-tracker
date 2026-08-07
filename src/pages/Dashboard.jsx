@@ -510,7 +510,7 @@ function GroqKeyPrompt({ onSaved }) {
   );
 }
 
-async function callGroq(system, userMessage, history = []) {
+async function callGroq(system, userMessage, history = [], maxTokens = 800) {
   const key = getGroqKey();
   if (!key) throw new Error("NO_KEY");
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -521,7 +521,7 @@ async function callGroq(system, userMessage, history = []) {
     },
     body: JSON.stringify({
       model: "llama-3.1-8b-instant",   // free, fast Groq model
-      max_tokens: 800,
+      max_tokens: maxTokens,
       temperature: 0.7,
       messages: [
         { role: "system", content: system },
@@ -640,6 +640,49 @@ function AISentimentPanel() {
 }
 
 // ── AI Stock Assistant (Groq + live Yahoo Finance context) ─────────
+// ── Preset research prompt for the AI Stock Assistant's growth-screener button ──
+const AGGRESSIVE_GROWTH_PROMPT = `Act as an aggressive-growth hedge fund manager.
+
+I am looking for stocks with the potential to outperform the market over the next 3-5 years.
+
+Requirements:
+- High risk, high reward
+- Market cap under $100 billion preferred
+- Exclude mega-caps such as Microsoft, Apple, Amazon, Alphabet, Meta, Nvidia, Tesla, Berkshire Hathaway and JPMorgan.
+- Focus on companies benefiting from major trends:
+ • Artificial Intelligence
+ • Data Centers
+ • Cybersecurity
+ • Defense Technology
+ • Robotics
+ • Quantum Computing
+ • Energy Infrastructure
+ • Nuclear Energy
+ • Space Technology
+ • Digital Assets / Blockchain
+ • Healthcare Innovation
+
+Based on your knowledge, identify companies that are commonly discussed in financial media, hedge fund commentary, analyst notes, and growth-investor communities as being tied to these trends. You don't have live web access, so be upfront if a name or claim might be dated rather than presenting it as current.
+
+For each stock provide:
+- Ticker
+- Country (US or Canada)
+- Market Cap
+- Why it is trending
+- Revenue growth rate
+- Profitability trend
+- Competitive advantage
+- Key catalysts for the next 12-24 months
+- Biggest risks
+- Expected upside if the investment thesis succeeds
+
+Then rank:
+1. Top 10 US stocks
+2. Top 10 Canadian stocks
+3. Top 5 highest conviction ideas regardless of country
+
+Finally, build a $100,000 aggressive portfolio with allocation percentages and explain why each position deserves its weight.`;
+
 function AIAssistantPanel() {
   const [msgs, setMsgs]   = useState([{ role: "assistant", text: "Hi! Ask me about any stock — I'll pull today's live price data before answering." }]);
   const [input, setInput] = useState("");
@@ -650,7 +693,14 @@ function AIAssistantPanel() {
 
   const SUGGESTIONS = ["What's today's price of NVDA?", "Compare TD.TO vs RY.TO today", "Is SHOP.TO up or down this week?", "Top Canadian dividend stocks?"];
 
-  const send = async (text) => {
+  // Preset long-form research prompt — see AGGRESSIVE_GROWTH_PROMPT below.
+  // Note: Groq's llama-3.1-8b-instant has no live web/browsing access, so
+  // it can't actually pull real-time Reddit/StockTwits/analyst data. The
+  // system prompt below tells it to be upfront about that instead of
+  // inventing specific "trending today" claims it can't verify.
+  const runAggressiveGrowthScreen = () => send(AGGRESSIVE_GROWTH_PROMPT, { maxTokens: 3500, skipLiveContext: true });
+
+  const send = async (text, opts = {}) => {
     const q = (text || input).trim();
     if (!q || loading) return;
     setInput("");
@@ -664,12 +714,12 @@ function AIAssistantPanel() {
         .filter(t => t.length >= 2 && !["IS","THE","AND","FOR","OR","IN","AT","VS","TO","UP","ON","BE","MY","WE"].includes(t))
         .slice(0, 5);
       let liveCtx = "";
-      if (tickers.length > 0) {
+      if (tickers.length > 0 && !opts.skipLiveContext) {
         liveCtx = await fetchLiveContext(tickers);
       }
       const today = new Date().toLocaleDateString("en-CA");
       const systemPrompt = `You are a stock market assistant for US (NYSE/NASDAQ) and Canadian (TSX/TSX-V) markets. Today is ${today}.${liveCtx ? `\n\nLive market data fetched right now:\n${liveCtx}\n\nUse these exact numbers when discussing these stocks.` : ""}\nBe concise and specific. Always note this is not financial advice.`;
-      const reply = await callGroq(systemPrompt, q, histRef.current.slice(0, -1));
+      const reply = await callGroq(systemPrompt, q, histRef.current.slice(0, -1), opts.maxTokens || 800);
       histRef.current = [...histRef.current, { role: "assistant", content: reply }];
       setMsgs(m => [...m, { role: "assistant", text: reply }]);
     } catch (err) {
@@ -697,6 +747,12 @@ function AIAssistantPanel() {
           <div className="px-4 pb-4 pt-1"><GroqKeyPrompt onSaved={() => setHasKey(true)} /></div>
         ) : (
           <>
+            <div className="px-4 pt-1 pb-2">
+              <button onClick={runAggressiveGrowthScreen} disabled={loading}
+                className="w-full text-left text-xs px-2.5 py-2 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition-colors flex items-center gap-1.5 font-medium disabled:opacity-50">
+                🚀 Aggressive Growth Stock Screener
+              </button>
+            </div>
             {msgs.length === 1 && (
               <div className="px-4 pb-2 flex flex-col gap-1">
                 {SUGGESTIONS.map((s, i) => (
