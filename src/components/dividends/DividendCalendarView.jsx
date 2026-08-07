@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react"
 import { getRate } from "@/api/rateContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Loader2, X } from "lucide-react"
-import { getDividendDataBatch } from "@/api/dividendData"
+import { getDividendDataBatch, getPaySchedule } from "@/api/dividendData"
 import { StockLogoButton } from "@/components/ui/StockPopup"
 import { cn } from "@/lib/utils"
 
@@ -112,7 +112,6 @@ function buildSchedule(dividends, stocks, divDataBySymbol) {
       // Start from THIS month if pay day hasn't passed yet, else next month
       const thisMonthPay = new Date(now.getFullYear(), now.getMonth(), payDay)
       next = thisMonthPay > now ? thisMonthPay : new Date(now.getFullYear(), now.getMonth() + 1, payDay)
-      next = new Date(now.getFullYear(), now.getMonth() + 1, payDay)
     } else {
       // Quarterly: use known pay day in correct quarter month
       const qm = [0,3,6,9]
@@ -237,12 +236,39 @@ export default function DividendCalendarView({ dividends=[], stocks=[], globalCu
     setLoading(true)
     try {
       const active = stocks.filter(s=>(s.shares||0)>0)
-      const batch  = await getDividendDataBatch(active)
       const result = {}
+      const needFetch = []
+      // Prefer the stock's own stored annual_dividend + the known-dividend
+      // table (same reliable source the "auto dividend" suggestions use) —
+      // only fall back to a live fetch for stocks with no stored rate at
+      // all. Previously this always hit the live fetch for every stock,
+      // which could disagree with (or miss) data the rest of the app
+      // already had correctly, e.g. weekly-payer ETFs.
       active.forEach(s => {
-        const d = batch[s.id]
-        if (d && d.annualTotal > 0) result[s.symbol] = d
+        const storedAnnual = (parseFloat(s.annual_dividend) || 0) * (s.shares || 0)
+        if (storedAnnual > 0) {
+          const sched = getPaySchedule(s.symbol)
+          result[s.symbol] = {
+            annualTotal: storedAnnual,
+            annualRatePerShare: parseFloat(s.annual_dividend) || 0,
+            payDay: sched.payDay,
+            payDow: sched.payDow,
+            payMonths: sched.payMonths,
+            frequency: sched.frequency,
+            yieldPct: parseFloat(s.dividend_yield) || 0,
+            source: "stored",
+          }
+        } else {
+          needFetch.push(s)
+        }
       })
+      if (needFetch.length > 0) {
+        const batch = await getDividendDataBatch(needFetch)
+        needFetch.forEach(s => {
+          const d = batch[s.id]
+          if (d && d.annualTotal > 0) result[s.symbol] = d
+        })
+      }
       setDivData(result)
     } catch(e) { console.error(e) }
     finally { setLoading(false) }

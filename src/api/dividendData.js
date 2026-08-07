@@ -83,11 +83,11 @@ const KNOWN_DIVIDENDS = {
   "HHIS.TO": { rate: 1.44, freq: 12, currency: "CAD" },   // Harvest Diversified High Income
   "MSTE.TO": { rate: 1.00, freq: 12, currency: "CAD" },   // Harvest Strategy Enhanced
   "ENCL.TO": { rate: 1.20, freq: 12, currency: "CAD" },
-  "UTES.TO": { rate: 0.84, freq: 12, currency: "CAD" },
+  "UTES.TO": { rate: 0.84, freq: 12, currency: "CAD", payDay: 10 },
   // Also store without .TO so lookup works regardless of how symbol is stored
   "ZWC":  { rate: 0.72, freq: 12, currency: "CAD" },
   "ZWB":  { rate: 0.60, freq: 12, currency: "CAD" },
-  "HDIV": { rate: 1.56, freq: 12, currency: "CAD", payDay:  8 },  // ~8th each month
+  "HDIV": { rate: 1.56, freq: 12, currency: "CAD", payDay: 10 },  // paid ~10th (confirmed Aug 2026)
   "ZPAY": { rate: 0.60, freq: 12, currency: "CAD" },
   "HYLD": { rate: 0.96, freq: 12, currency: "CAD", payDay: 12 },
   "XDIV": { rate: 0.84, freq: 12, currency: "CAD" },
@@ -212,8 +212,8 @@ const KNOWN_DIVIDENDS = {
   "VOO":       { rate: 7.86,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard S&P500
   "VTI":       { rate: 3.55,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard Total Market
   "CANY.TO":   { rate: 2.52,   freq: 12, currency: "CAD", payDay: 9  },  // Evolve Canadian Equity — $12.60/mo / 60sh
-  "QQCL.TO":   { rate: 3.72,   freq: 12, currency: "CAD", payDay: 8  },  // Global X Enhanced NASDAQ — $12.40/mo / 40sh
-  "USCL.TO":   { rate: 2.82,   freq: 12, currency: "CAD", payDay: 8  },  // Global X Enhanced S&P500 — $9.40/mo / 40sh
+  "QQCL.TO":   { rate: 3.72,   freq: 12, currency: "CAD", payDay: 10 },  // Global X Enhanced NASDAQ — $12.40/mo / 40sh
+  "USCL.TO":   { rate: 2.82,   freq: 12, currency: "CAD", payDay: 10 },  // Global X Enhanced S&P500 — $9.40/mo / 40sh
   "MSFT.NE":   { rate: 0.186,  freq: 4,  currency: "CAD", payDay: 8, payMonths: [3,6,9,12] },  // Microsoft CAD-listed
   "TRP":   { rate: 3.72,  freq: 4,  currency: "CAD", payDay: 30, payMonths: [1,4,7,10] },
   "ENB":   { rate: 3.77,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [3,6,9,12] },
@@ -275,7 +275,10 @@ async function fetchFromYahoo(symbol, stock = {}) {
   const yahooTicker = toYahooTicker(symbol, stock)
   for (const proxy of PROXIES) {
     try {
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=1y`;
+      // events=div pulls actual historical dividend payment dates/amounts —
+      // used to derive the REAL pay day/frequency instead of a hardcoded
+      // guess, so this stays accurate even if a company changes its schedule.
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=1y&events=div`;
       const res = await fetch(`${proxy}${encodeURIComponent(url)}`, {
         headers: { Accept: "application/json" },
       });
@@ -289,11 +292,46 @@ async function fetchFromYahoo(symbol, stock = {}) {
       const rate  = meta.trailingAnnualDividendRate;
       const yld   = meta.trailingAnnualDividendYield ?? meta.dividendYield;
 
+      // Parse real dividend event dates (if present) to derive an actual
+      // pay day / day-of-week / frequency, rather than assuming one.
+      const divEvents = data?.chart?.result?.[0]?.events?.dividends;
+      let derivedPayDay = null, derivedPayDow = null, derivedFrequency = null, derivedPayMonths = null, lastPayDate = null;
+      if (divEvents) {
+        const dates = Object.values(divEvents)
+          .map(e => new Date(e.date * 1000))
+          .sort((a, b) => a - b);
+        if (dates.length > 0) {
+          lastPayDate   = dates[dates.length - 1];
+          derivedPayDay = lastPayDate.getDate();
+          derivedPayDow = lastPayDate.getDay();
+        }
+        if (dates.length >= 2) {
+          const diffs = [];
+          for (let i = 1; i < dates.length; i++) diffs.push((dates[i] - dates[i-1]) / 86400000);
+          const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+          if      (avg <= 10)  derivedFrequency = 52;
+          else if (avg <= 20)  derivedFrequency = 26;
+          else if (avg <= 35)  derivedFrequency = 12;
+          else if (avg <= 95)  derivedFrequency = 4;
+          else if (avg <= 200) derivedFrequency = 2;
+          else                 derivedFrequency = 1;
+          // Only meaningful for non-monthly/weekly payers (quarterly etc.)
+          if (derivedFrequency < 11) {
+            derivedPayMonths = [...new Set(dates.map(d => d.getMonth() + 1))].sort((a,b) => a-b);
+          }
+        }
+      }
+
       if (rate && rate > 0) {
         return {
           annualRatePerShare: rate,
           yieldDecimal: yld ?? (price ? rate / price : null),
           price,
+          payDay: derivedPayDay,
+          payDow: derivedPayDow,
+          payMonths: derivedPayMonths,
+          frequency: derivedFrequency,
+          lastPayDate: lastPayDate ? lastPayDate.toISOString().slice(0,10) : null,
           source: "yahoo",
         };
       }
@@ -345,49 +383,128 @@ Use frequency: 12=monthly, 4=quarterly, 2=semi-annual, 1=annual. Use 0 if no div
 // ── Main export: get dividend info for a stock ─────────────────────
 // Returns { annualRatePerShare, yieldDecimal, frequency, source }
 
-// ── Quick lookup: get the known per-share annual rate for a symbol,
-// no network required. Used to independently sanity-check stored data.
-export function getKnownRatePerShare(symbol) {
+// ── Shared table lookup (tries plain symbol, then common TSX suffixes) ─
+function lookupKnown(symbol) {
   const sym = (symbol || "").toUpperCase()
-  const known = KNOWN_DIVIDENDS[sym]
+  return KNOWN_DIVIDENDS[sym]
     || KNOWN_DIVIDENDS[sym + ".TO"]
     || KNOWN_DIVIDENDS[sym + ".UN.TO"]
     || KNOWN_DIVIDENDS[sym + ".UN"]
     || KNOWN_DIVIDENDS[sym.replace(/\.TO$/, "")]
     || KNOWN_DIVIDENDS[sym.replace(/\.UN\.TO$/, "")]
     || KNOWN_DIVIDENDS[sym.replace(/\.UN$/, "")]
+    || null
+}
+
+// ── Monthly-refreshing live cache ──────────────────────────────────
+// The hardcoded KNOWN_DIVIDENDS table above is a manually-curated snapshot
+// and will drift out of date (a company raises its dividend, a fund shifts
+// its pay day, etc). This cache stores what Yahoo Finance's *actual*
+// dividend event history says — real rate, real last-paid date (so pay
+// day/day-of-week/frequency are derived from reality, not guessed) — and
+// is treated as stale after 30 days so it gets re-checked automatically.
+const SCHEDULE_CACHE_KEY  = "dividend_schedule_cache_v1"
+const LAST_REFRESH_KEY    = "dividend_data_last_refresh_v1"
+const REFRESH_STALE_DAYS  = 30
+
+function loadScheduleCache() {
+  try { return JSON.parse(localStorage.getItem(SCHEDULE_CACHE_KEY) || "{}") } catch { return {} }
+}
+function saveScheduleCache(cache) {
+  localStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify(cache))
+}
+function daysSince(isoDate) {
+  if (!isoDate) return Infinity
+  return (Date.now() - new Date(isoDate).getTime()) / 86400000
+}
+function freshCacheEntry(symbol) {
+  const entry = loadScheduleCache()[(symbol || "").toUpperCase()]
+  return entry && daysSince(entry.lastChecked) < REFRESH_STALE_DAYS ? entry : null
+}
+
+// Whether a full monthly refresh is due (checked once per app load).
+export function isDividendRefreshDue() {
+  return daysSince(localStorage.getItem(LAST_REFRESH_KEY)) >= REFRESH_STALE_DAYS
+}
+
+// Re-checks live dividend data for every distinct symbol in `stocks`. Only
+// call this when isDividendRefreshDue() is true — it makes one live request
+// per symbol. Updates the schedule cache (consulted by getPaySchedule and
+// getDividendData ahead of the hardcoded table) and returns a map of
+// symbol -> fresh data so the caller can decide whether to update each
+// stock's own stored annual_dividend/dividend_yield fields too.
+export async function refreshDividendScheduleCache(stocks) {
+  const cache = loadScheduleCache()
+  const symbols = [...new Set((stocks || []).map(s => s.symbol).filter(Boolean))]
+  const changes = {}
+  for (const sym of symbols) {
+    try {
+      const stock = stocks.find(s => s.symbol === sym)
+      const yahoo = await fetchFromYahoo(sym, stock)
+      if (yahoo && yahoo.annualRatePerShare > 0) {
+        const prior = cache[sym.toUpperCase()] || {}
+        cache[sym.toUpperCase()] = {
+          rate:       yahoo.annualRatePerShare,
+          payDay:     yahoo.payDay     || prior.payDay     || null,
+          payDow:     yahoo.payDow     || prior.payDow     || null,
+          payMonths:  yahoo.payMonths  || prior.payMonths  || null,
+          frequency:  yahoo.frequency  || prior.frequency  || null,
+          lastPayDate: yahoo.lastPayDate || prior.lastPayDate || null,
+          lastChecked: new Date().toISOString(),
+        }
+        changes[sym] = yahoo
+      }
+    } catch { /* leave this symbol's cache untouched, retry next month */ }
+  }
+  saveScheduleCache(cache)
+  localStorage.setItem(LAST_REFRESH_KEY, new Date().toISOString())
+  return changes
+}
+
+// ── Quick lookup: get the known per-share annual rate for a symbol,
+// no network required. Used to independently sanity-check stored data.
+export function getKnownRatePerShare(symbol) {
+  const fresh = freshCacheEntry(symbol)
+  if (fresh && fresh.rate > 0) return fresh.rate
+  const known = lookupKnown(symbol)
   return known && known.rate > 0 ? known.rate : null
 }
 
 // ── Quick lookup: get payMonths + payDay for a symbol (no network) ─
+// Prefers a fresh (< 30 days old) live-derived cache entry per field,
+// falling back to the hardcoded table for whatever the cache doesn't have.
 export function getPaySchedule(symbol) {
-  const sym = (symbol || "").toUpperCase()
-  const known = KNOWN_DIVIDENDS[sym]
-    || KNOWN_DIVIDENDS[sym + ".TO"]
-    || KNOWN_DIVIDENDS[sym + ".UN.TO"]
-    || KNOWN_DIVIDENDS[sym + ".UN"]
-    || KNOWN_DIVIDENDS[sym.replace(/\.TO$/, "")]
-    || KNOWN_DIVIDENDS[sym.replace(/\.UN\.TO$/, "")]
-    || KNOWN_DIVIDENDS[sym.replace(/\.UN$/, "")]
-  if (!known) return { payMonths: null, payDay: null, frequency: 4 }
+  const fresh = freshCacheEntry(symbol)
+  const known = lookupKnown(symbol)
   return {
-    payMonths: known.payMonths || null,
-    payDay:    known.payDay    || null,
-    payDow:    known.payDow    || null,
-    frequency: known.freq      || 4,
+    payMonths: (fresh && fresh.payMonths) || (known && known.payMonths) || null,
+    payDay:    (fresh && fresh.payDay)    || (known && known.payDay)    || null,
+    payDow:    (fresh && fresh.payDow)    || (known && known.payDow)    || null,
+    frequency: (fresh && fresh.frequency) || (known && known.freq)      || 4,
   }
 }
 
 export async function getDividendData(symbol, shares, avgCost, stock = {}) {
-  // 1. Check hardcoded table — try plain symbol first, then with .TO suffix
-  const sym = symbol.toUpperCase()
-  const known = KNOWN_DIVIDENDS[sym]
-    || KNOWN_DIVIDENDS[sym + ".TO"]
-    || KNOWN_DIVIDENDS[sym + ".UN.TO"]
-    || KNOWN_DIVIDENDS[sym + ".UN"]
-    || KNOWN_DIVIDENDS[sym.replace(/\.TO$/, "")]
-    || KNOWN_DIVIDENDS[sym.replace(/\.UN\.TO$/, "")]
-    || KNOWN_DIVIDENDS[sym.replace(/\.UN$/, "")]
+  // 1. Prefer a fresh live-derived cache entry (real rate + real pay date)
+  const fresh = freshCacheEntry(symbol)
+  if (fresh && fresh.rate > 0) {
+    const annualTotal = fresh.rate * shares;
+    const yieldDecimal = avgCost > 0 ? fresh.rate / avgCost : 0;
+    return {
+      annualRatePerShare: fresh.rate,
+      annualTotal,
+      payDay:    fresh.payDay    || null,
+      payDow:    fresh.payDow    || null,
+      payMonths: fresh.payMonths || null,
+      yieldDecimal,
+      yieldPct: yieldDecimal * 100,
+      frequency: fresh.frequency || 4,
+      source: "live_cache",
+    };
+  }
+
+  // 2. Check hardcoded table — try plain symbol first, then with .TO suffix
+  const known = lookupKnown(symbol)
   if (known && known.rate > 0) {
     const annualTotal = known.rate * shares;
     const yieldDecimal = avgCost > 0 ? known.rate / avgCost : 0;
@@ -404,7 +521,7 @@ export async function getDividendData(symbol, shares, avgCost, stock = {}) {
     };
   }
 
-  // 2. Try Yahoo Finance v8 chart
+  // 3. Try Yahoo Finance v8 chart
   const yahoo = await fetchFromYahoo(symbol, stock);
   if (yahoo && yahoo.annualRatePerShare > 0) {
     return {
@@ -412,12 +529,14 @@ export async function getDividendData(symbol, shares, avgCost, stock = {}) {
       annualTotal: yahoo.annualRatePerShare * shares,
       yieldDecimal: yahoo.yieldDecimal,
       yieldPct: yahoo.yieldDecimal ? yahoo.yieldDecimal * 100 : 0,
-      frequency: 4, // default quarterly if Yahoo doesn't specify
+      payDay: yahoo.payDay || null,
+      payDow: yahoo.payDow || null,
+      frequency: yahoo.frequency || 4, // default quarterly if Yahoo doesn't specify
       source: "yahoo",
     };
   }
 
-  // 3. If Yahoo returned nothing useful, return null (no dividend or data unavailable)
+  // 4. If Yahoo returned nothing useful, return null (no dividend or data unavailable)
   return null;
 }
 

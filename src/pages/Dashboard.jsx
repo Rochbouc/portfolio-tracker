@@ -3,7 +3,7 @@ import { getRate } from "@/api/rateContext"
 import { getYearContributions } from "@/lib/contributions"
 import { Stock, Transaction, Dividend, CashPosition, CashContribution, adjustCash, setCash, deleteCash, cloudSetValue } from "@/api/localData";
 import { fetchQuote, searchTickers, fetchUSDCADRate } from "@/api/stockSearch";
-import { getPaySchedule, getKnownRatePerShare } from "@/api/dividendData";
+import { getPaySchedule, getKnownRatePerShare, isDividendRefreshDue, refreshDividendScheduleCache } from "@/api/dividendData";
 import { StockLogo as StockLogoShared } from "@/components/ui/StockPopup";
 import { logout } from "@/components/auth/Login";
 import { ToastProvider, useToast } from "@/components/ui/toast";
@@ -1000,6 +1000,44 @@ function DashboardInner() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Monthly live dividend refresh: once every ~30 days, re-check real
+  // rate/yield/pay-date data from Yahoo for every held stock (not just ones
+  // missing data) so a dividend increase, cut, or schedule change gets
+  // picked up automatically instead of relying on the hardcoded reference
+  // table going stale. Runs in the background after the page has already
+  // rendered — never blocks the initial load — and only updates a stock's
+  // stored annual_dividend/dividend_yield when the live value differs
+  // meaningfully (>2%) from what's currently stored, to avoid noisy
+  // rounding-driven updates.
+  useEffect(() => {
+    if (stocks.length === 0) return;
+    if (!isDividendRefreshDue()) return;
+    let cancelled = false;
+    (async () => {
+      const fresh = await refreshDividendScheduleCache(stocks);
+      if (cancelled) return;
+      const updates = [];
+      for (const st of stocks) {
+        const f = fresh[st.symbol];
+        if (!f || !(f.annualRatePerShare > 0)) continue;
+        const stored = parseFloat(st.annual_dividend) || 0;
+        const pctDiff = stored > 0 ? Math.abs(f.annualRatePerShare - stored) / stored : 1;
+        if (stored <= 0 || pctDiff > 0.02) {
+          updates.push({
+            id: st.id,
+            annual_dividend: parseFloat(f.annualRatePerShare.toFixed(4)),
+            dividend_yield: f.yieldDecimal ? parseFloat((f.yieldDecimal * 100).toFixed(4)) : st.dividend_yield,
+          });
+        }
+      }
+      if (updates.length > 0) {
+        await Promise.all(updates.map(u => Stock.update(u.id, { annual_dividend: u.annual_dividend, dividend_yield: u.dividend_yield }).catch(() => {})));
+        if (!cancelled) await loadAll();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stocks.length > 0]);
 
   const refreshPrices = useCallback(async () => {
     if (stocks.length === 0) return;
