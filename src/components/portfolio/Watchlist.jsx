@@ -775,20 +775,16 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-sm text-gray-900">{s.symbol}</span>
-                                    <span className="text-[11px] text-gray-400">{s.shares} sh</span>
+                                    {yieldPct != null && yieldPct > 0 && (
+                                      <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
+                                        {yieldPct.toFixed(2)}% yield
+                                      </span>
+                                    )}
+                                    {ext?.sector && (
+                                      <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{ext.sector}</span>
+                                    )}
                                   </div>
-                                  {(ext?.sector || (yieldPct != null && yieldPct > 0)) && (
-                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                      {ext?.sector && (
-                                        <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{ext.sector}</span>
-                                      )}
-                                      {yieldPct != null && yieldPct > 0 && (
-                                        <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
-                                          {yieldPct.toFixed(2)}% yield
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
+                                  <div className="text-[11px] text-gray-400">{s.shares} sh</div>
                                 </div>
                               </div>
                               <div className="text-right shrink-0">
@@ -809,7 +805,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                               gradientClass="bg-gradient-to-r from-red-300 via-yellow-200 to-green-400"
                               markerClass="bg-blue-500" />
                             <RangeBar low={ext?.targetLow} high={ext?.targetHigh} current={q?.price}
-                              label={`Analyst target${ext?.numAnalysts ? ` (${ext.numAnalysts})` : ""}`}
+                              label={`12-month forecast${ext?.numAnalysts ? ` (${ext.numAnalysts} analysts)` : ""}`}
                               gradientClass="bg-gradient-to-r from-orange-200 via-blue-200 to-purple-300"
                               markerClass="bg-indigo-600" />
                           </div>
@@ -985,24 +981,18 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
                       <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-bold text-sm text-gray-900">{sym}</span>
+                        {yieldPct != null && yieldPct > 0 && (
+                          <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
+                            {yieldPct.toFixed(2)}% yield
+                          </span>
+                        )}
+                        {sector && (
+                          <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{sector}</span>
+                        )}
                         {anyHit && <BellRing className="h-3.5 w-3.5 text-yellow-500 animate-pulse" />}
                         {symAlerts.length > 0 && !anyHit && <Bell className="h-3 w-3 text-gray-300" />}
-                        {q?.shortName && <span className="text-[11px] text-gray-400 truncate max-w-[120px]">{q.shortName}</span>}
                       </div>
-
-                      {/* Sector + dividend yield */}
-                      {(sector || yieldPct != null) && (
-                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                          {sector && (
-                            <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{sector}</span>
-                          )}
-                          {yieldPct != null && yieldPct > 0 && (
-                            <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">
-                              {yieldPct.toFixed(2)}% yield
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      {q?.shortName && <div className="text-[11px] text-gray-400 truncate">{q.shortName}</div>}
 
                       {/* Alert chips */}
                       {symAlerts.length > 0 && (
@@ -1125,7 +1115,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
 
                   {/* Analyst price target range */}
                   <RangeBar low={extInfo[sym]?.targetLow} high={extInfo[sym]?.targetHigh} current={q?.price}
-                    label={`Analyst target${extInfo[sym]?.numAnalysts ? ` (${extInfo[sym].numAnalysts})` : ""}`}
+                    label={`12-month forecast${extInfo[sym]?.numAnalysts ? ` (${extInfo[sym].numAnalysts} analysts)` : ""}`}
                     gradientClass="bg-gradient-to-r from-orange-200 via-blue-200 to-purple-300"
                     markerClass="bg-indigo-600" />
                 </div>
