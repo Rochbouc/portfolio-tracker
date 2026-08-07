@@ -959,10 +959,15 @@ function DashboardInner() {
     // independently confirms the rate really is that high.
     const yieldSanityFixes = [];
     for (const st of s) {
-      const price = parseFloat(st.current_price) || 0;
       const storedAnnual = parseFloat(st.annual_dividend) || 0;
-      if (price <= 0 || storedAnnual <= 0) continue;
-      const impliedYieldPct = (storedAnnual / price) * 100;
+      if (storedAnnual <= 0) continue;
+      const price = parseFloat(st.current_price) || 0;
+      const storedYieldPct = parseFloat(st.dividend_yield) || 0;
+      // Prefer computing implied yield directly from annual_dividend ÷ price
+      // when price is available (most accurate); current_price isn't always
+      // persisted back onto the stock record after the initial add, so fall
+      // back to whatever dividend_yield percentage is already stored.
+      const impliedYieldPct = price > 0 ? (storedAnnual / price) * 100 : storedYieldPct;
       if (impliedYieldPct <= 150) continue;
       const knownRate = getKnownRatePerShare(st.symbol);
       if (knownRate && Math.abs(knownRate - storedAnnual) / storedAnnual < 0.5) continue; // independently confirmed legitimate
