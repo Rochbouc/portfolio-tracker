@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { fetchChartData, fetchKeyStats } from "@/api/stockSearch";
-import { fetchGroqAnalystEstimate } from "@/api/analystEstimate";
+import { ensureAnalystEstimate } from "@/api/analystEstimate";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Loader2, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -74,7 +74,7 @@ export default function StockDetailPanel({ stock, quote, onClose }) {
       // If Groq key is set, also fetch analyst estimates
       if (getGroqKey() && s) {
         setAnalystLoading(true);
-        fetchGroqAnalystEstimate(
+        ensureAnalystEstimate(
           stock.symbol, stock.name,
           s.price ?? livePrice,
           s.week52Low, s.week52High, s.sma200,

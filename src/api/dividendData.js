@@ -29,7 +29,6 @@ const KNOWN_DIVIDENDS = {
   "WMT":   { rate: 0.83,  freq: 4,  currency: "USD" },
   "HD":    { rate: 9.00,  freq: 4,  currency: "USD" },
   "V":     { rate: 2.34,  freq: 4,  currency: "USD", payMonths: [3, 6, 9, 12] },
-  "MA":    { rate: 2.64,  freq: 4,  currency: "USD", payMonths: [2, 5, 8, 11] },
   "PFE":   { rate: 1.68,  freq: 4,  currency: "USD" },
   "ABT":   { rate: 2.20,  freq: 4,  currency: "USD" },
   "MMM":   { rate: 2.80,  freq: 4,  currency: "USD" },
@@ -239,10 +238,10 @@ const KNOWN_DIVIDENDS = {
   "AZN":   { rate: 3.00,  freq: 2,  currency: "USD", payDay: 15, payMonths: [3,9] },
   "LLY":   { rate: 5.40,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
   "ABBV":  { rate: 6.20,  freq: 4,  currency: "USD", payDay: 15, payMonths: [2,5,8,11] },
-  "COST":  { rate: 4.60,  freq: 4,  currency: "USD", payDay: 12, payMonths: [2,5,8,11] },
+  "COST":  { rate: 5.88,  freq: 4,  currency: "USD", payDay: 7,  payMonths: [2,5,8,10] },  // $1.47/qtr; pays ~7th; Feb/May/Aug/Oct not Nov
   "MSFT":  { rate: 3.32,  freq: 4,  currency: "USD", payDay:  8, payMonths: [3,6,9,12] },
   "AAPL":  { rate: 1.00,  freq: 4,  currency: "USD", payDay: 15, payMonths: [2,5,8,11] },
-  "MA":    { rate: 2.64,  freq: 4,  currency: "USD", payDay:  9, payMonths: [2,5,8,11] },
+  "MA":    { rate: 3.48,  freq: 4,  currency: "USD", payDay: 7,  payMonths: [2,5,8,11] },  // $0.87/qtr; pays ~7th-8th
   "V":     { rate: 2.34,  freq: 4,  currency: "USD", payDay:  5, payMonths: [3,6,9,12] },
   "T":     { rate: 1.11,  freq: 4,  currency: "USD", payDay:  1, payMonths: [2,5,8,11] },
   "XOM":   { rate: 3.84,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
