@@ -1101,7 +1101,7 @@ function DashboardInner() {
   // same cache keys the watchlist uses, so a symbol looked up from either
   // place only ever gets fetched once. Groq-based (see api/analystEstimate);
   // requires a Groq key to be set, same as the existing per-stock dropdown.
-  const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v2";
+  const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v3";
   const YTD_CACHE_KEY = "holdings_ytd_cache_v1";
   const loadExtInfoCache = () => { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}"); } catch { return {}; } };
   const saveExtInfoCache = c => localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c));
@@ -1118,8 +1118,8 @@ function DashboardInner() {
     if (needExt.length > 0) {
       (async () => {
         const cache = loadExtInfoCache();
-        for (let i = 0; i < needExt.length; i += 3) {
-          const batch = needExt.slice(i, i + 3);
+        for (let i = 0; i < needExt.length; i += 2) {
+          const batch = needExt.slice(i, i + 2);
           const results = await Promise.allSettled(batch.map(async sym => {
             const stock = stocks.find(s => s.symbol === sym) || {};
             const q = prices[sym] || {};
@@ -1132,8 +1132,13 @@ function DashboardInner() {
               numAnalysts: est.analysts ?? null,
             }];
           }));
-          results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] || null; });
-          if (i + 3 < needExt.length) await new Promise(res => setTimeout(res, 400));
+          // Only cache successes — a failed/rate-limited call (common when
+          // batching many Groq requests back to back) must NOT be cached as
+          // null, or that stock silently never gets a forecast again. Not
+          // caching failures just means it retries next page load, which is
+          // cheap and self-healing.
+          results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) cache[r.value[0]] = r.value[1]; });
+          if (i + 2 < needExt.length) await new Promise(res => setTimeout(res, 1200));
         }
         saveExtInfoCache(cache);
         setStockExtInfo(prev => ({ ...prev, ...cache }));

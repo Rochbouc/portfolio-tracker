@@ -81,7 +81,7 @@ const KNOWN_DIVIDENDS = {
   "HDIF.TO": { rate: 1.20, freq: 12, currency: "CAD" },   // Hamilton Diversified
   "HHIS.TO": { rate: 1.44, freq: 12, currency: "CAD" },   // Harvest Diversified High Income
   "MSTE.TO": { rate: 1.00, freq: 12, currency: "CAD" },   // Harvest Strategy Enhanced
-  "ENCL.TO": { rate: 1.20, freq: 12, currency: "CAD" },
+  "ENCL.TO": { rate: 1.20, freq: 12, currency: "CAD", payDay: 10 },
   "UTES.TO": { rate: 0.84, freq: 12, currency: "CAD", payDay: 10 },
   // Also store without .TO so lookup works regardless of how symbol is stored
   "ZWC":  { rate: 0.72, freq: 12, currency: "CAD" },
@@ -210,7 +210,7 @@ const KNOWN_DIVIDENDS = {
   "REI-UN.TO": { rate: 1.04,   freq: 12, currency: "CAD", payDay: 8  },  // RioCan REIT — paid ~5th-10th (was wrongly set to 2nd)
   "VOO":       { rate: 7.86,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard S&P500
   "VTI":       { rate: 3.55,   freq: 4,  currency: "USD", payDay: 26, payMonths: [1,4,7,10] },  // Vanguard Total Market
-  "CANY.TO":   { rate: 2.52,   freq: 12, currency: "CAD", payDay: 9  },  // Evolve Canadian Equity — $12.60/mo / 60sh
+  "CANY.TO":   { rate: 2.52,   freq: 12, currency: "CAD", payDay: 10 },  // Evolve Canadian Equity — pays ~10th, not 9th
   "QQCL.TO":   { rate: 3.72,   freq: 12, currency: "CAD", payDay: 10 },  // Global X Enhanced NASDAQ — $12.40/mo / 40sh
   "USCL.TO":   { rate: 2.82,   freq: 12, currency: "CAD", payDay: 10 },  // Global X Enhanced S&P500 — $9.40/mo / 40sh
   "MSFT.NE":   { rate: 0.186,  freq: 4,  currency: "CAD", payDay: 8, payMonths: [3,6,9,12] },  // Microsoft CAD-listed

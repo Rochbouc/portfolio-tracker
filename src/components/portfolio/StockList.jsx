@@ -10,7 +10,7 @@ import RangeBar from "./RangeBar"
 
 // Same cache the watchlist uses for sector + analyst forecast — a stock
 // looked up from either place only gets fetched once.
-const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v2"
+const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v3"
 function loadExtInfoCache() { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}") } catch { return {} } }
 function saveExtInfoCache(c) { localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c)) }
 

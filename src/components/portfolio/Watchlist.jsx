@@ -24,7 +24,7 @@ function save(key, d) { localStorage.setItem(key, JSON.stringify(d)) }
 
 function genListId() { return "wl_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
 
-const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v2"  // v2: switched from broken Yahoo quoteSummary to Groq-based estimate
+const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v3"  // v3: v2 poison-cached failed/rate-limited Groq calls as permanent nulls; fixed to only cache successes
 function loadExtInfoCache() { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}") } catch { return {} } }
 function saveExtInfoCache(c) { localStorage.setItem(EXT_INFO_CACHE_KEY, JSON.stringify(c)) }
 
@@ -394,14 +394,16 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
     const need = [...new Set(symbolList)].filter(sym => extInfo[sym] === undefined && loadExtInfoCache()[sym] === undefined)
     if (need.length === 0) return
     const cache = loadExtInfoCache()
-    for (let i = 0; i < need.length; i += 3) {
-      const batch = need.slice(i, i + 3)
+    for (let i = 0; i < need.length; i += 2) {
+      const batch = need.slice(i, i + 2)
       const results = await Promise.allSettled(batch.map(async sym => {
         const { stock, quote } = getContext(sym)
         return [sym, await fetchExtendedInfo(sym, stock, quote)]
       }))
-      results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] || null })
-      if (i + 3 < need.length) await new Promise(res => setTimeout(res, 400))
+      // Only cache successes — a failed/rate-limited Groq call must NOT be
+      // cached as null, or that stock silently never gets a forecast again.
+      results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) cache[r.value[0]] = r.value[1] })
+      if (i + 2 < need.length) await new Promise(res => setTimeout(res, 1200))
     }
     saveExtInfoCache(cache)
     setExtInfo(prev => ({ ...prev, ...cache }))
