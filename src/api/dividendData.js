@@ -77,7 +77,7 @@ const KNOWN_DIVIDENDS = {
   "HYLD.TO": { rate: 0.96, freq: 12, currency: "CAD" },
   "XDIV.TO": { rate: 0.84, freq: 12, currency: "CAD" },
   // Your covered call ETFs (Canadian) — monthly, .TO suffix
-  "HMAX.TO": { rate: 1.68, freq: 12, currency: "CAD" },   // Hamilton Canadian Financials Yield Max
+  "HMAX.TO": { rate: 1.68, freq: 12, currency: "CAD", payDay: 10 },   // Hamilton Canadian Financials Yield Max — monthly, not weekly; pays ~10th like the rest of the Hamilton family
   "HDIF.TO": { rate: 1.20, freq: 12, currency: "CAD" },   // Hamilton Diversified
   "HHIS.TO": { rate: 1.44, freq: 12, currency: "CAD" },   // Harvest Diversified High Income
   "MSTE.TO": { rate: 1.00, freq: 12, currency: "CAD" },   // Harvest Strategy Enhanced
@@ -90,14 +90,14 @@ const KNOWN_DIVIDENDS = {
   "ZPAY": { rate: 0.60, freq: 12, currency: "CAD" },
   "HYLD": { rate: 0.96, freq: 12, currency: "CAD", payDay: 12 },
   "XDIV": { rate: 0.84, freq: 12, currency: "CAD" },
-  "HMAX": { rate: 1.68, freq: 12, currency: "CAD", payDay:  8 },
+  "HMAX": { rate: 1.68, freq: 12, currency: "CAD", payDay: 10 },
   "HHIS": { rate: 1.44, freq: 12, currency: "CAD", payDay: 10 },
   "MSTE": { rate: 1.00, freq: 12, currency: "CAD", payDay: 10 },
   "HDIF": { rate: 1.20, freq: 12, currency: "CAD" },
   // US covered call / high-yield ETFs — monthly
   "QDTE":  { rate: 3.60, freq: 52, currency: "USD", payDow: 5 }, // Friday weekly  // Roundhill 0DTE Nasdaq — WEEKLY
   "XDTE":  { rate: 4.80, freq: 52, currency: "USD", payDow: 5 }, // Friday weekly  // Roundhill 0DTE S&P 500 — WEEKLY
-  "YMAX":  { rate: 2.40, freq: 52, currency: "USD" },  // YieldMax Universe — WEEKLY
+  "YMAX":  { rate: 2.40, freq: 52, currency: "USD", payDow: 4 },  // YieldMax Universe — WEEKLY, pays Thursdays not Fridays
   // Other weekly-paying ETFs
   "YMAG":  { rate: 2.80, freq: 52, currency: "USD" },  // YieldMax Mag7 — WEEKLY
   "MSFO":  { rate: 3.20, freq: 52, currency: "USD" },  // YieldMax MSFT — WEEKLY

@@ -1353,6 +1353,7 @@ function DashboardInner() {
       const sched      = getPaySchedule(st.symbol);
       const freq       = sched?.frequency || 4;
       const payDay     = sched?.payDay || null;
+      const payDow     = sched?.payDow != null ? sched.payDow : 5;  // day of week for weekly payers — default Friday, but use the real one when known (e.g. YMAX pays Thursday)
       const payMonths  = sched?.payMonths || null;
       const isWeekly   = freq >= 50;
       const isMonthly  = freq >= 11;
@@ -1376,7 +1377,7 @@ function DashboardInner() {
 
         // Is a payment expected on this date?
         let expected = false;
-        if (isWeekly && checkDate.getDay() === 5) expected = true;  // Friday
+        if (isWeekly && checkDate.getDay() === payDow) expected = true;
         else if (isMonthly && payDay && dom === payDay) expected = true;
         else if (isMonthly && !payDay && dom === 15) expected = true;
         else if (!isWeekly && !isMonthly && payMonths && payMonths.includes(mo) && payDay && dom === payDay) expected = true;
