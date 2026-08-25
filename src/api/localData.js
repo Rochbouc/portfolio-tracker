@@ -158,11 +158,11 @@ const SIMPLE_SYNCED_KEYS = [
   "historical_dividends_per_stock_v2", "yoy_portfolio_history_v1",
   "proj60_accounts_v3", "proj60_settings_v1", "tfsa_tracker_v1",
   "contribution_tracking", "dividend_archive", "dismissed_div_suggestions",
-  "dividend_schedule_cache_v1", "dividend_data_last_refresh_v1",
+  "dividend_schedule_cache_v2", "dividend_data_last_refresh_v2",
 ]
 // Keys stored as a raw string in localStorage (not JSON) — everything else
 // in SIMPLE_SYNCED_KEYS is JSON (array/object).
-const RAW_STRING_KEYS = ["groq_api_key", "dividend_data_last_refresh_v1"]
+const RAW_STRING_KEYS = ["groq_api_key", "dividend_data_last_refresh_v2"]
 
 export const Stock = makeEntity("stocks");
 export const Transaction = makeEntity("transactions");

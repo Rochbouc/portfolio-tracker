@@ -301,8 +301,13 @@ async function fetchFromYahoo(symbol, stock = {}) {
           .sort((a, b) => a - b);
         if (dates.length > 0) {
           lastPayDate   = dates[dates.length - 1];
-          derivedPayDay = lastPayDate.getDate();
-          derivedPayDow = lastPayDate.getDay();
+          // Use UTC, not local time, when reading the day/day-of-week off a
+          // Yahoo event timestamp — interpreting it in the browser's local
+          // timezone can shift it to the wrong calendar day (e.g. a UTC
+          // timestamp near midnight reads back a day earlier in Atlantic
+          // time), silently corrupting the derived pay day.
+          derivedPayDay = lastPayDate.getUTCDate();
+          derivedPayDow = lastPayDate.getUTCDay();
         }
         if (dates.length >= 2) {
           const diffs = [];
@@ -316,7 +321,7 @@ async function fetchFromYahoo(symbol, stock = {}) {
           else                 derivedFrequency = 1;
           // Only meaningful for non-monthly/weekly payers (quarterly etc.)
           if (derivedFrequency < 11) {
-            derivedPayMonths = [...new Set(dates.map(d => d.getMonth() + 1))].sort((a,b) => a-b);
+            derivedPayMonths = [...new Set(dates.map(d => d.getUTCMonth() + 1))].sort((a,b) => a-b);
           }
         }
       }
@@ -402,8 +407,8 @@ function lookupKnown(symbol) {
 // dividend event history says — real rate, real last-paid date (so pay
 // day/day-of-week/frequency are derived from reality, not guessed) — and
 // is treated as stale after 30 days so it gets re-checked automatically.
-const SCHEDULE_CACHE_KEY  = "dividend_schedule_cache_v1"
-const LAST_REFRESH_KEY    = "dividend_data_last_refresh_v1"
+const SCHEDULE_CACHE_KEY  = "dividend_schedule_cache_v2"  // v2: v1 derived pay day/dow using local timezone instead of UTC, corrupting weekly-payer days for users off UTC
+const LAST_REFRESH_KEY    = "dividend_data_last_refresh_v2"
 const REFRESH_STALE_DAYS  = 30
 
 function loadScheduleCache() {
