@@ -106,7 +106,7 @@ export default function AddStockForm({ open, onOpenChange, onSubmit, editStock }
     setDivFetching(true);
     try {
       // Use the v8 chart which returns dividendYield in meta
-      const PROXIES = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="];
+      const PROXIES = ["https://corsproxy.io/?url=", "https://api.allorigins.win/raw?url="];
       for (const proxy of PROXIES) {
         try {
           const url = `https://query2.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1y`;

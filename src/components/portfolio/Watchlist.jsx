@@ -60,7 +60,7 @@ async function fetchQuoteWithYTD(symbol) {
   try {
     const { toYahooTicker } = await import("@/api/tickerUtils")
     const yahooTicker = toYahooTicker(symbol, {})
-    const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+    const proxies = ["https://corsproxy.io/?url=", "https://api.allorigins.win/raw?url="]
     const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=ytd`
     for (const proxy of proxies) {
       try {

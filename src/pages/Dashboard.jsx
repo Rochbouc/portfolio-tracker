@@ -543,7 +543,7 @@ async function callGroq(system, userMessage, history = [], maxTokens = 800) {
 // ── Shared: fetch live quote context for Groq ─────────────────────
 async function fetchLiveContext(symbols) {
   const PROXIES = [
-    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
     url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   ];
   const results = [];
@@ -822,7 +822,7 @@ function ExchangeRateWidget() {
   async function fetchLive() {
     setLoading(true)
     try {
-      const proxies = ["https://corsproxy.io/?", "https://api.allorigins.win/raw?url="]
+      const proxies = ["https://corsproxy.io/?url=", "https://api.allorigins.win/raw?url="]
       for (const proxy of proxies) {
         try {
           const res = await fetch(`${proxy}${encodeURIComponent("https://query2.finance.yahoo.com/v8/finance/chart/USDCAD=X?interval=1d&range=1d")}`, { signal: AbortSignal.timeout(6000) })

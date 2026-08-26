@@ -6,7 +6,7 @@
  */
 
 const PROXIES = [
-  "https://corsproxy.io/?",
+  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
 ];
 

@@ -1,5 +1,5 @@
 const PROXIES = [
-  (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ]
 
