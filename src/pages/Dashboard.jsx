@@ -1173,12 +1173,14 @@ function DashboardInner() {
       // Fetch in small staggered batches rather than all at once — firing
       // a request per stock simultaneously (this portfolio can have 70+)
       // reliably gets a chunk of them silently rate-limited by the free
-      // CORS proxy, which is why some stocks (e.g. RY) can end up
-      // permanently stuck with "no live data" even though the ticker
-      // itself is perfectly valid.
+      // CORS proxy. Each batch's results are applied to `prices`
+      // immediately as they arrive (not saved up until the very end), so
+      // the page fills in progressively instead of showing nothing for the
+      // whole cycle.
       const symbols = stocks.map(s => s.symbol);
-      async function fetchBatch(symbolList, batchSize = 4, delayMs = 500) {
-        const map = {};
+      const found = {};
+      const batchSize = 6, delayMs = 300;
+      async function runBatches(symbolList) {
         for (let i = 0; i < symbolList.length; i += batchSize) {
           const batch = symbolList.slice(i, i + batchSize);
           const results = await Promise.allSettled(batch.map(async sym => {
@@ -1186,23 +1188,20 @@ function DashboardInner() {
             const q = await fetchQuote(sym, stock || {});
             return [sym, q];
           }));
-          results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) map[r.value[0]] = r.value[1]; });
+          const batchMap = {};
+          results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) { batchMap[r.value[0]] = r.value[1]; found[r.value[0]] = r.value[1]; } });
+          if (Object.keys(batchMap).length > 0) setPrices(prev => ({ ...prev, ...batchMap }));
           if (i + batchSize < symbolList.length) await new Promise(res => setTimeout(res, delayMs));
         }
-        return map;
       }
-      let map = await fetchBatch(symbols);
-      // Retry anything that came back empty once, after a short pause —
-      // recovers most transient rate-limit misses in one pass.
-      const missing = symbols.filter(sym => !map[sym]);
+      await runBatches(symbols);
+      // One retry pass for anything that came back empty — recovers most
+      // transient rate-limit misses without noticeably slowing things down.
+      const missing = symbols.filter(sym => !found[sym]);
       if (missing.length > 0) {
-        await new Promise(res => setTimeout(res, 1000));
-        const retryMap = await fetchBatch(missing);
-        map = { ...map, ...retryMap };
+        await new Promise(res => setTimeout(res, 600));
+        await runBatches(missing);
       }
-      // Merge rather than replace — a quote that fails this cycle keeps
-      // showing its last-known price instead of flashing to "no live data".
-      setPrices(prev => ({ ...prev, ...map }));
     } catch { }
     finally { setRefreshing(false); }
   }, [stocks]);
