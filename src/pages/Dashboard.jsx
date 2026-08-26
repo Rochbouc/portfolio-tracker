@@ -1170,11 +1170,39 @@ function DashboardInner() {
       if (liveRate) setRate(liveRate);
     } catch {}
     try {
-      const entries = await Promise.all(stocks.map(async s => {
-        const q = await fetchQuote(s.symbol, s);
-        return [s.symbol, q];
-      }));
-      setPrices(Object.fromEntries(entries.filter(([, q]) => q)));
+      // Fetch in small staggered batches rather than all at once — firing
+      // a request per stock simultaneously (this portfolio can have 70+)
+      // reliably gets a chunk of them silently rate-limited by the free
+      // CORS proxy, which is why some stocks (e.g. RY) can end up
+      // permanently stuck with "no live data" even though the ticker
+      // itself is perfectly valid.
+      const symbols = stocks.map(s => s.symbol);
+      async function fetchBatch(symbolList, batchSize = 4, delayMs = 500) {
+        const map = {};
+        for (let i = 0; i < symbolList.length; i += batchSize) {
+          const batch = symbolList.slice(i, i + batchSize);
+          const results = await Promise.allSettled(batch.map(async sym => {
+            const stock = stocks.find(s => s.symbol === sym);
+            const q = await fetchQuote(sym, stock || {});
+            return [sym, q];
+          }));
+          results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) map[r.value[0]] = r.value[1]; });
+          if (i + batchSize < symbolList.length) await new Promise(res => setTimeout(res, delayMs));
+        }
+        return map;
+      }
+      let map = await fetchBatch(symbols);
+      // Retry anything that came back empty once, after a short pause —
+      // recovers most transient rate-limit misses in one pass.
+      const missing = symbols.filter(sym => !map[sym]);
+      if (missing.length > 0) {
+        await new Promise(res => setTimeout(res, 1000));
+        const retryMap = await fetchBatch(missing);
+        map = { ...map, ...retryMap };
+      }
+      // Merge rather than replace — a quote that fails this cycle keeps
+      // showing its last-known price instead of flashing to "no live data".
+      setPrices(prev => ({ ...prev, ...map }));
     } catch { }
     finally { setRefreshing(false); }
   }, [stocks]);
