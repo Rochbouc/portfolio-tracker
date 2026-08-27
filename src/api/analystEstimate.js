@@ -32,7 +32,7 @@ export async function fetchGroqAnalystEstimate(symbol, name, price, week52Low, w
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: "openai/gpt-oss-20b",
         max_tokens: 200,
         temperature: 0.3,
         messages: [{

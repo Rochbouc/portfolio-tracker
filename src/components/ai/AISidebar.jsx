@@ -3,7 +3,7 @@ import { db } from '../../api/localData'
 import { Button, Input, Card, Spinner } from '../ui/index.jsx'
 
 const GROQ_API = 'https://api.groq.com/openai/v1/chat/completions'
-const MODEL = 'llama-3.1-8b-instant'
+const MODEL = 'openai/gpt-oss-20b'
 
 async function groqChat(apiKey, messages) {
   const res = await fetch(GROQ_API, {

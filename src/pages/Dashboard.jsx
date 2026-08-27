@@ -522,7 +522,7 @@ async function callGroq(system, userMessage, history = [], maxTokens = 800) {
       "Authorization": `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: "llama-3.1-8b-instant",   // free, fast Groq model
+      model: "openai/gpt-oss-20b",   // free, fast Groq model
       max_tokens: maxTokens,
       temperature: 0.7,
       messages: [
@@ -696,7 +696,7 @@ function AIAssistantPanel() {
   const SUGGESTIONS = ["What's today's price of NVDA?", "Compare TD.TO vs RY.TO today", "Is SHOP.TO up or down this week?", "Top Canadian dividend stocks?"];
 
   // Preset long-form research prompt — see AGGRESSIVE_GROWTH_PROMPT below.
-  // Note: Groq's llama-3.1-8b-instant has no live web/browsing access, so
+  // Note: Groq's openai/gpt-oss-20b has no live web/browsing access, so
   // it can't actually pull real-time Reddit/StockTwits/analyst data. The
   // system prompt below tells it to be upfront about that instead of
   // inventing specific "trending today" claims it can't verify.

@@ -216,7 +216,7 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "openai/gpt-oss-20b",
           max_tokens: 1200,
           messages: [{ role: "user", content: prompt }]
         })
