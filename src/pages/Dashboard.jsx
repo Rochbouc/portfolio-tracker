@@ -1161,8 +1161,17 @@ function DashboardInner() {
     }
   }, [stocks.map(s => s.symbol).sort().join(",")]);
 
+  const priceRefreshInFlight = useRef(false);
   const refreshPrices = useCallback(async () => {
     if (stocks.length === 0) return;
+    // Guard against overlapping runs — if a cycle is still in flight (e.g.
+    // the 60s interval fires again before the previous cycle finished),
+    // skip rather than stack another full pass on top of it. Multiple
+    // overlapping cycles hammering the same free CORS proxy at once was
+    // the actual cause of prices going from "loads fine" to "unreliable
+    // and slow" — worse than doing nothing extra.
+    if (priceRefreshInFlight.current) return;
+    priceRefreshInFlight.current = true;
     setRefreshing(true);
     try {
       // Fetch live USD/CAD rate first
@@ -1176,10 +1185,11 @@ function DashboardInner() {
       // CORS proxy. Each batch's results are applied to `prices`
       // immediately as they arrive (not saved up until the very end), so
       // the page fills in progressively instead of showing nothing for the
-      // whole cycle.
+      // whole cycle. Batch size/delay tuned to finish well within the 60s
+      // refresh interval so cycles can't stack on top of each other.
       const symbols = stocks.map(s => s.symbol);
       const found = {};
-      const batchSize = 6, delayMs = 300;
+      const batchSize = 12, delayMs = 150;
       async function runBatches(symbolList) {
         for (let i = 0; i < symbolList.length; i += batchSize) {
           const batch = symbolList.slice(i, i + batchSize);
@@ -1199,11 +1209,11 @@ function DashboardInner() {
       // transient rate-limit misses without noticeably slowing things down.
       const missing = symbols.filter(sym => !found[sym]);
       if (missing.length > 0) {
-        await new Promise(res => setTimeout(res, 600));
+        await new Promise(res => setTimeout(res, 500));
         await runBatches(missing);
       }
     } catch { }
-    finally { setRefreshing(false); }
+    finally { setRefreshing(false); priceRefreshInFlight.current = false; }
   }, [stocks]);
 
   useEffect(() => { if (stocks.length > 0 && Object.keys(prices).length === 0) refreshPrices(); }, [stocks]);
