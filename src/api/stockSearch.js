@@ -6,8 +6,8 @@
 import { toYahooTicker } from "./tickerUtils"
 
 const CORS_PROXIES = [
-  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
+  "https://corsproxy.io/?url=",
 ]
 
 async function proxyFetch(url) {

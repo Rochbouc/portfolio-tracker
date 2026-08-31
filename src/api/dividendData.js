@@ -6,8 +6,8 @@
  */
 
 const PROXIES = [
-  "https://corsproxy.io/?url=",
   "https://api.allorigins.win/raw?url=",
+  "https://corsproxy.io/?url=",
 ];
 
 // ── Hardcoded dividend table (annual $ per share, updated June 2026) ──

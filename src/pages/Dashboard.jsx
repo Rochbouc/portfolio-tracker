@@ -822,7 +822,7 @@ function ExchangeRateWidget() {
   async function fetchLive() {
     setLoading(true)
     try {
-      const proxies = ["https://corsproxy.io/?url=", "https://api.allorigins.win/raw?url="]
+      const proxies = ["https://api.allorigins.win/raw?url=", "https://corsproxy.io/?url="]
       for (const proxy of proxies) {
         try {
           const res = await fetch(`${proxy}${encodeURIComponent("https://query2.finance.yahoo.com/v8/finance/chart/USDCAD=X?interval=1d&range=1d")}`, { signal: AbortSignal.timeout(6000) })
@@ -913,7 +913,22 @@ function DashboardInner() {
   const [stocks, setStocks] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [dividends, setDividends] = useState([]);
-  const [prices, setPrices] = useState({});
+  // Prices start hydrated from the last successful fetch (localStorage),
+  // not blank — this is what actually fixes the "feels broken" perception:
+  // the page shows real (if a few minutes old) numbers instantly on load,
+  // then the background refresh quietly replaces them with fresh ones,
+  // instead of showing nothing while waiting on a slow/rate-limited proxy.
+  const PRICES_CACHE_KEY = "cached_prices_v1";
+  const [prices, setPricesRaw] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(PRICES_CACHE_KEY) || "{}"); } catch { return {}; }
+  });
+  const setPrices = useCallback((updater) => {
+    setPricesRaw(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      try { localStorage.setItem(PRICES_CACHE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
   const [refreshing, setRefreshing] = useState(false);
   const [rate, setRate] = useState(() => {
     try {
@@ -1244,7 +1259,18 @@ function DashboardInner() {
     finally { setRefreshing(false); priceRefreshInFlight.current = false; }
   }, [stocks]);
 
-  useEffect(() => { if (stocks.length > 0 && Object.keys(prices).length === 0) refreshPrices(); }, [stocks]);
+  // Always kick off one fresh refresh as soon as stocks are loaded — even
+  // though `prices` is now pre-populated from the local cache for an
+  // instant first paint, that cached data can be stale and must not be
+  // mistaken for "already refreshed". Guarded to fire once per mount, not
+  // on every `stocks` reference change.
+  const didInitialPriceRefresh = useRef(false);
+  useEffect(() => {
+    if (stocks.length > 0 && !didInitialPriceRefresh.current) {
+      didInitialPriceRefresh.current = true;
+      refreshPrices();
+    }
+  }, [stocks]);
   // Sync rate from ExchangeRateWidget (Settings) via localStorage
   useEffect(() => {
     function onStorage(e) {
