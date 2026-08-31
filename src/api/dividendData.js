@@ -269,24 +269,32 @@ const KNOWN_DIVIDENDS = {
 };
 
 // ── Fetch from Yahoo Finance v8 chart ─────────────────────────────
+// Races both CORS proxies simultaneously and uses whichever responds first
+// with valid data, instead of guessing which one is currently faster.
+async function raceProxiesForJson(url) {
+  const attempts = PROXIES.map(async proxy => {
+    const res = await fetch(`${proxy}${encodeURIComponent(url)}`, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("bad response");
+    const data = await res.json();
+    if (!data) throw new Error("empty response");
+    return data;
+  });
+  try { return await Promise.any(attempts); } catch { return null; }
+}
+
 async function fetchFromYahoo(symbol, stock = {}) {
   const { toYahooTicker } = await import("./tickerUtils")
   const yahooTicker = toYahooTicker(symbol, stock)
-  for (const proxy of PROXIES) {
-    try {
-      // events=div pulls actual historical dividend payment dates/amounts —
-      // used to derive the REAL pay day/frequency instead of a hardcoded
-      // guess, so this stays accurate even if a company changes its schedule.
-      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=1y&events=div`;
-      const res = await fetch(`${proxy}${encodeURIComponent(url)}`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const meta = data?.chart?.result?.[0]?.meta;
-      if (!meta) continue;
+  try {
+    // events=div pulls actual historical dividend payment dates/amounts —
+    // used to derive the REAL pay day/frequency instead of a hardcoded
+    // guess, so this stays accurate even if a company changes its schedule.
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooTicker)}?interval=1d&range=1y&events=div`;
+    const data = await raceProxiesForJson(url);
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
 
-      const price = meta.regularMarketPrice;
+    const price = meta.regularMarketPrice;
       // trailingAnnualDividendRate is $ per share per year
       const rate  = meta.trailingAnnualDividendRate;
       const yld   = meta.trailingAnnualDividendYield ?? meta.dividendYield;
@@ -341,9 +349,7 @@ async function fetchFromYahoo(symbol, stock = {}) {
       }
       // Even if rate is 0/null, return what we have for non-dividend stocks
       return { annualRatePerShare: 0, yieldDecimal: 0, price, source: "yahoo_nodiv" };
-    } catch { /* try next */ }
-  }
-  return null;
+  } catch { return null; }
 }
 
 // ── Ask Groq for dividend data ─────────────────────────────────────

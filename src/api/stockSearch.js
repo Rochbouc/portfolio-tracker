@@ -10,19 +10,26 @@ const CORS_PROXIES = [
   "https://corsproxy.io/?url=",
 ]
 
+// Races both CORS proxies simultaneously and uses whichever responds first
+// with valid data — avoids having to guess which one is currently faster
+// or more reliable (both are free, unmonitored third-party services whose
+// relative performance can shift at any time).
 async function proxyFetch(url) {
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const res = await fetch(`${proxy}${encodeURIComponent(url)}`, {
-        headers: { "Accept": "application/json" },
-        signal: AbortSignal.timeout(8000),
-      })
-      if (!res.ok) continue
-      const data = await res.json()
-      return data
-    } catch { /* try next proxy */ }
+  const attempts = CORS_PROXIES.map(async proxy => {
+    const res = await fetch(`${proxy}${encodeURIComponent(url)}`, {
+      headers: { "Accept": "application/json" },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) throw new Error("bad response")
+    const data = await res.json()
+    if (!data) throw new Error("empty response")
+    return data
+  })
+  try {
+    return await Promise.any(attempts)
+  } catch {
+    return null // every proxy failed
   }
-  return null
 }
 
 
