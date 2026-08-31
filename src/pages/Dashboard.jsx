@@ -1068,33 +1068,42 @@ function DashboardInner() {
   // stored annual_dividend/dividend_yield when the live value differs
   // meaningfully (>2%) from what's currently stored, to avoid noisy
   // rounding-driven updates.
+  // Staggered so this doesn't compete with the price refresh (which should
+  // win priority — it's what you actually look at first) or the sector/
+  // forecast/YTD fetchers below. Everything hitting the same free proxy at
+  // once is what turned "occasionally slow" into "unreliable across the
+  // board" — queuing them a few seconds apart lets each one actually finish
+  // cleanly instead of all degrading together.
   useEffect(() => {
     if (stocks.length === 0) return;
     if (!isDividendRefreshDue()) return;
     let cancelled = false;
-    (async () => {
-      const fresh = await refreshDividendScheduleCache(stocks);
+    const t = setTimeout(() => {
       if (cancelled) return;
-      const updates = [];
-      for (const st of stocks) {
-        const f = fresh[st.symbol];
-        if (!f || !(f.annualRatePerShare > 0)) continue;
-        const stored = parseFloat(st.annual_dividend) || 0;
-        const pctDiff = stored > 0 ? Math.abs(f.annualRatePerShare - stored) / stored : 1;
-        if (stored <= 0 || pctDiff > 0.02) {
-          updates.push({
-            id: st.id,
-            annual_dividend: parseFloat(f.annualRatePerShare.toFixed(4)),
-            dividend_yield: f.yieldDecimal ? parseFloat((f.yieldDecimal * 100).toFixed(4)) : st.dividend_yield,
-          });
+      (async () => {
+        const fresh = await refreshDividendScheduleCache(stocks);
+        if (cancelled) return;
+        const updates = [];
+        for (const st of stocks) {
+          const f = fresh[st.symbol];
+          if (!f || !(f.annualRatePerShare > 0)) continue;
+          const stored = parseFloat(st.annual_dividend) || 0;
+          const pctDiff = stored > 0 ? Math.abs(f.annualRatePerShare - stored) / stored : 1;
+          if (stored <= 0 || pctDiff > 0.02) {
+            updates.push({
+              id: st.id,
+              annual_dividend: parseFloat(f.annualRatePerShare.toFixed(4)),
+              dividend_yield: f.yieldDecimal ? parseFloat((f.yieldDecimal * 100).toFixed(4)) : st.dividend_yield,
+            });
+          }
         }
-      }
-      if (updates.length > 0) {
-        await Promise.all(updates.map(u => Stock.update(u.id, { annual_dividend: u.annual_dividend, dividend_yield: u.dividend_yield }).catch(() => {})));
-        if (!cancelled) await loadAll();
-      }
-    })();
-    return () => { cancelled = true; };
+        if (updates.length > 0) {
+          await Promise.all(updates.map(u => Stock.update(u.id, { annual_dividend: u.annual_dividend, dividend_yield: u.dividend_yield }).catch(() => {})));
+          if (!cancelled) await loadAll();
+        }
+      })();
+    }, 20000);  // let price refresh + ext-info/YTD finish their first pass first
+    return () => { cancelled = true; clearTimeout(t); };
   }, [stocks.length > 0]);
 
   // Sector + 12-month analyst forecast + YTD % for the main holdings list —
@@ -1116,48 +1125,67 @@ function DashboardInner() {
 
     const needExt = symbols.filter(sym => stockExtInfo[sym] === undefined);
     if (needExt.length > 0) {
-      (async () => {
-        const cache = loadExtInfoCache();
-        for (let i = 0; i < needExt.length; i += 2) {
-          const batch = needExt.slice(i, i + 2);
-          const results = await Promise.allSettled(batch.map(async sym => {
-            const stock = stocks.find(s => s.symbol === sym) || {};
-            const q = prices[sym] || {};
-            const est = await ensureAnalystEstimate(sym, stock.name || q.shortName || sym, q.price, q.fiftyTwoWeekLow, q.fiftyTwoWeekHigh, null, q.currency || stock.currency);
-            if (!est) return [sym, null];
-            return [sym, {
-              sector: stock.sector || est.sector || null,
-              targetLow: est.targetLow ?? null,
-              targetHigh: est.targetHigh ?? null,
-              numAnalysts: est.analysts ?? null,
-            }];
-          }));
-          // Only cache successes — a failed/rate-limited call (common when
-          // batching many Groq requests back to back) must NOT be cached as
-          // null, or that stock silently never gets a forecast again. Not
-          // caching failures just means it retries next page load, which is
-          // cheap and self-healing.
-          results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) cache[r.value[0]] = r.value[1]; });
-          if (i + 2 < needExt.length) await new Promise(res => setTimeout(res, 1200));
-        }
-        saveExtInfoCache(cache);
-        setStockExtInfo(prev => ({ ...prev, ...cache }));
-      })();
+      // Small delay before starting — Groq is a separate service from the
+      // Yahoo/CORS-proxy pipeline used for prices, so this doesn't compete
+      // for the same resource, but still avoid piling everything onto the
+      // page at the exact same instant.
+      const t = setTimeout(() => {
+        (async () => {
+          const cache = loadExtInfoCache();
+          for (let i = 0; i < needExt.length; i += 2) {
+            const batch = needExt.slice(i, i + 2);
+            const results = await Promise.allSettled(batch.map(async sym => {
+              const stock = stocks.find(s => s.symbol === sym) || {};
+              const q = prices[sym] || {};
+              const est = await ensureAnalystEstimate(sym, stock.name || q.shortName || sym, q.price, q.fiftyTwoWeekLow, q.fiftyTwoWeekHigh, null, q.currency || stock.currency);
+              if (!est) return [sym, null];
+              return [sym, {
+                sector: stock.sector || est.sector || null,
+                targetLow: est.targetLow ?? null,
+                targetHigh: est.targetHigh ?? null,
+                numAnalysts: est.analysts ?? null,
+              }];
+            }));
+            // Only cache successes — a failed/rate-limited call (common when
+            // batching many Groq requests back to back) must NOT be cached as
+            // null, or that stock silently never gets a forecast again. Not
+            // caching failures just means it retries next page load, which is
+            // cheap and self-healing.
+            results.forEach(r => { if (r.status === "fulfilled" && r.value[1]) cache[r.value[0]] = r.value[1]; });
+            if (i + 2 < needExt.length) await new Promise(res => setTimeout(res, 1200));
+          }
+          saveExtInfoCache(cache);
+          setStockExtInfo(prev => ({ ...prev, ...cache }));
+        })();
+      }, 3000);
+      return () => clearTimeout(t);
     }
+  }, [stocks.map(s => s.symbol).sort().join(",")]);
+
+  useEffect(() => {
+    const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))];
+    if (symbols.length === 0) return;
 
     const needYtd = symbols.filter(sym => stockYtdMap[sym] === undefined);
     if (needYtd.length > 0) {
-      (async () => {
-        const cache = loadYtdCache();
-        for (let i = 0; i < needYtd.length; i += 3) {
-          const batch = needYtd.slice(i, i + 3);
-          const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchQuoteYTD(sym, stocks.find(s => s.symbol === sym) || {})]));
-          results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] ?? null; });
-          if (i + 3 < needYtd.length) await new Promise(res => setTimeout(res, 400));
-        }
-        saveYtdCache(cache);
-        setStockYtdMap(prev => ({ ...prev, ...cache }));
-      })();
+      // YTD goes through the same Yahoo/CORS-proxy pipeline as live prices —
+      // delay it well behind the price refresh's first pass so it doesn't
+      // compete for that same rate-limited resource right when the page
+      // loads (this was a real contributor to "no live data" popping up).
+      const t = setTimeout(() => {
+        (async () => {
+          const cache = loadYtdCache();
+          for (let i = 0; i < needYtd.length; i += 3) {
+            const batch = needYtd.slice(i, i + 3);
+            const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchQuoteYTD(sym, stocks.find(s => s.symbol === sym) || {})]));
+            results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] ?? null; });
+            if (i + 3 < needYtd.length) await new Promise(res => setTimeout(res, 400));
+          }
+          saveYtdCache(cache);
+          setStockYtdMap(prev => ({ ...prev, ...cache }));
+        })();
+      }, 15000);
+      return () => clearTimeout(t);
     }
   }, [stocks.map(s => s.symbol).sort().join(",")]);
 
