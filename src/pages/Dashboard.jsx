@@ -978,7 +978,14 @@ function DashboardInner() {
   const [cashModalAccount, setCashModalAccount] = useState("");
   const [cashModalCurrency, setCashModalCurrency] = useState("CAD");
 
+  // Guards against overlapping loadAll() calls resolving out of order —
+  // e.g. adding two stocks in quick succession fires two loadAll() calls,
+  // and if the first (older) one happens to finish its Firestore round-trip
+  // after the second (newer) one, it would silently overwrite the more
+  // up-to-date state with a stale snapshot missing the latest addition.
+  const loadAllGeneration = useRef(0);
   const loadAll = useCallback(async () => {
+    const myGeneration = ++loadAllGeneration.current;
     const [s, t, d, cp, cc] = await Promise.all([Stock.list(), Transaction.list(), Dividend.list(), CashPosition.list(), CashContribution.list()]);
 
     // Auto-repair annual_dividend records saved as TOTAL instead of PER-SHARE
@@ -1069,6 +1076,10 @@ function DashboardInner() {
     if (toFix.length > 0) {
       await Promise.all(toFix.map(div => Dividend.update(div.id, div).catch(() => {})));
     }
+    // If a newer loadAll() call has started since this one began, discard
+    // this (now-stale) result instead of letting it overwrite more current
+    // state — this is the actual fix for out-of-order async responses.
+    if (myGeneration !== loadAllGeneration.current) return;
     setStocks(s); setTransactions(t); setDividends(fixed); setCashPositions(cp); setCashContributions(cc);
   }, []);
 
