@@ -1028,6 +1028,31 @@ function DashboardInner() {
       }
     }
 
+    // Backfill annual_dividend for stocks that have NONE at all — e.g. a
+    // newly added stock whose live yield lookup failed at add-time (proxy
+    // issues), leaving it silently stuck at 0 forever, contributing nothing
+    // to Est. Annual Dividends until the once-a-month live refresh happens
+    // to reach it. The reference table doesn't depend on the network at
+    // all, so backfilling from it here means a new dividend-paying stock
+    // counts immediately instead of waiting up to 30 days.
+    const divBackfills = [];
+    for (const st of s) {
+      const shares = parseFloat(st.shares) || 0;
+      const storedAnnual = parseFloat(st.annual_dividend) || 0;
+      if (shares <= 0 || storedAnnual > 0) continue;
+      const referencePerShare = getKnownRatePerShare(st.symbol);
+      if (referencePerShare > 0) {
+        divBackfills.push({ id: st.id, annual_dividend: parseFloat(referencePerShare.toFixed(4)) });
+      }
+    }
+    if (divBackfills.length > 0) {
+      await Promise.all(divBackfills.map(f => Stock.update(f.id, { annual_dividend: f.annual_dividend }).catch(() => {})));
+      for (const f of divBackfills) {
+        const idx = s.findIndex(x => x.id === f.id);
+        if (idx !== -1) s[idx] = { ...s[idx], annual_dividend: f.annual_dividend };
+      }
+    }
+
     // Auto-clear implausible annual_dividend values — data providers
     // occasionally return garbage dividend figures for illiquid microcaps
     // and penny stocks (seen in practice: a $0.03 CNSX stock stored with a
