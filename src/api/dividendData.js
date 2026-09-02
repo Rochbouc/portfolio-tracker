@@ -225,7 +225,7 @@ const KNOWN_DIVIDENDS = {
   "CNR":   { rate: 3.24,  freq: 4,  currency: "CAD", payDay: 31, payMonths: [3,6,9,12] },
   "BNS":   { rate: 4.24,  freq: 4,  currency: "CAD", payDay: 27, payMonths: [1,4,7,10] },
   "BMO":   { rate: 5.84,  freq: 4,  currency: "CAD", payDay: 26, payMonths: [2,5,8,11] },
-  "CU":    { rate: 1.78,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [1,4,7,10] },
+  "CU":    { rate: 1.85,  freq: 4,  currency: "CAD", payDay:  1, payMonths: [3,6,9,12] },  // Canadian Utilities — pays 1st of Mar/Jun/Sep/Dec, not Jan/Apr/Jul/Oct; rate was stale at $1.78 vs actual $1.85
   "BN":    { rate: 0.76,  freq: 4,  currency: "CAD", payDay: 28, payMonths: [3,6,9,12] },
   "DOL":   { rate: 0.48,  freq: 4,  currency: "CAD", payDay:  7, payMonths: [2,5,8,11] },  // Dollarama — recent pays land on the 7th-9th, not the 5th; rate was stale at $0.92 vs actual $0.48/yr
   "VFV":   { rate: 2.40,  freq: 12, currency: "CAD", payDay: 25 },

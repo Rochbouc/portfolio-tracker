@@ -96,8 +96,20 @@ function buildSchedule(dividends, stocks, divDataBySymbol) {
     let next
     if (lastActual) {
       if (isWeekly) {
-        next = addDays(lastActual, dayStep)
-        while (next <= now) next = addDays(next, dayStep)
+        if (knownPayDow != null) {
+          // Snap to the correct day-of-week rather than perpetuating
+          // whatever weekday the last actual entry happened to be recorded
+          // on — if that entry was logged a few days late, blindly adding
+          // 7-day increments from it locks every future projection onto
+          // the wrong day forever (e.g. QDTE showing Monday instead of its
+          // real Friday schedule).
+          next = new Date(lastActual)
+          next.setDate(next.getDate() + ((knownPayDow - next.getDay() + 7) % 7 || 7))
+          while (next <= now) next = addDays(next, 7)
+        } else {
+          next = addDays(lastActual, dayStep)
+          while (next <= now) next = addDays(next, dayStep)
+        }
       } else {
         // Advance month-by-month but use the known payDay
         next = new Date(lastActual.getFullYear(), lastActual.getMonth() + moStep, payDay)
