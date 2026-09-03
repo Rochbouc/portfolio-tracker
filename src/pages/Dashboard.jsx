@@ -1122,7 +1122,12 @@ function DashboardInner() {
   // Real prices take priority on load — these background fetchers now wait
   // for the actual first price refresh to finish (not a guessed delay)
   // before starting anything, so they can never compete with it for the
-  // same rate-limited proxy right when the page loads.
+  // same rate-limited proxy right when the page loads. Set true once the
+  // first price refresh completes (see refreshPrices below). Declared here,
+  // before any effect that reads it, since referencing a const before its
+  // declaration crashes the component.
+  const [initialPriceRefreshDone, setInitialPriceRefreshDone] = useState(false);
+
   useEffect(() => {
     if (stocks.length === 0 || !initialPriceRefreshDone) return;
     if (!isDividendRefreshDue()) return;
@@ -1159,13 +1164,6 @@ function DashboardInner() {
   // same cache keys the watchlist uses, so a symbol looked up from either
   // place only ever gets fetched once. Groq-based (see api/analystEstimate);
   // requires a Groq key to be set, same as the existing per-stock dropdown.
-  // Real prices take priority on load — these background fetchers below
-  // wait on this being true before starting anything, so they can never
-  // compete with the price refresh for the same rate-limited proxy right
-  // when the page loads. Set true once the first price refresh completes
-  // (see refreshPrices below).
-  const [initialPriceRefreshDone, setInitialPriceRefreshDone] = useState(false);
-
   const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v3";
   const YTD_CACHE_KEY = "holdings_ytd_cache_v1";
   const loadExtInfoCache = () => { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}"); } catch { return {}; } };
