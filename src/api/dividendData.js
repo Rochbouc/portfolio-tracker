@@ -245,7 +245,7 @@ const KNOWN_DIVIDENDS = {
   "V":     { rate: 2.34,  freq: 4,  currency: "USD", payDay:  5, payMonths: [3,6,9,12] },
   "T":     { rate: 1.11,  freq: 4,  currency: "USD", payDay:  1, payMonths: [2,5,8,11] },
   "XOM":   { rate: 3.84,  freq: 4,  currency: "USD", payDay: 10, payMonths: [3,6,9,12] },
-  "RTX":   { rate: 2.60,  freq: 4,  currency: "USD", payDay: 26, payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~26th
+  "RTX":   { rate: 2.92,  freq: 4,  currency: "USD", payDay: 3,  payMonths: [3,6,9,12] },  // quarterly: Mar/Jun/Sep/Dec ~3rd, not 26th; rate was stale at $2.60 vs actual $2.92
   "PEP":   { rate: 5.42,  freq: 4,  currency: "USD", payDay:  5, payMonths: [1,4,7,10] },
   "AVGO":  { rate: 21.00, freq: 4,  currency: "USD", payDay: 29, payMonths: [3,6,9,12] },
   "GOOGL": { rate: 0.80,  freq: 4,  currency: "USD", payDay: 17, payMonths: [3,6,9,12] },

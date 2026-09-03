@@ -1119,14 +1119,12 @@ function DashboardInner() {
   // stored annual_dividend/dividend_yield when the live value differs
   // meaningfully (>2%) from what's currently stored, to avoid noisy
   // rounding-driven updates.
-  // Staggered so this doesn't compete with the price refresh (which should
-  // win priority — it's what you actually look at first) or the sector/
-  // forecast/YTD fetchers below. Everything hitting the same free proxy at
-  // once is what turned "occasionally slow" into "unreliable across the
-  // board" — queuing them a few seconds apart lets each one actually finish
-  // cleanly instead of all degrading together.
+  // Real prices take priority on load — these background fetchers now wait
+  // for the actual first price refresh to finish (not a guessed delay)
+  // before starting anything, so they can never compete with it for the
+  // same rate-limited proxy right when the page loads.
   useEffect(() => {
-    if (stocks.length === 0) return;
+    if (stocks.length === 0 || !initialPriceRefreshDone) return;
     if (!isDividendRefreshDue()) return;
     let cancelled = false;
     const t = setTimeout(() => {
@@ -1153,14 +1151,21 @@ function DashboardInner() {
           if (!cancelled) await loadAll();
         }
       })();
-    }, 20000);  // let price refresh + ext-info/YTD finish their first pass first
+    }, 8000);  // small buffer after prices finish, before the heaviest fetcher starts
     return () => { cancelled = true; clearTimeout(t); };
-  }, [stocks.length > 0]);
+  }, [stocks.length > 0, initialPriceRefreshDone]);
 
   // Sector + 12-month analyst forecast + YTD % for the main holdings list —
   // same cache keys the watchlist uses, so a symbol looked up from either
   // place only ever gets fetched once. Groq-based (see api/analystEstimate);
   // requires a Groq key to be set, same as the existing per-stock dropdown.
+  // Real prices take priority on load — these background fetchers below
+  // wait on this being true before starting anything, so they can never
+  // compete with the price refresh for the same rate-limited proxy right
+  // when the page loads. Set true once the first price refresh completes
+  // (see refreshPrices below).
+  const [initialPriceRefreshDone, setInitialPriceRefreshDone] = useState(false);
+
   const EXT_INFO_CACHE_KEY = "watchlist_ext_info_cache_v3";
   const YTD_CACHE_KEY = "holdings_ytd_cache_v1";
   const loadExtInfoCache = () => { try { return JSON.parse(localStorage.getItem(EXT_INFO_CACHE_KEY) || "{}"); } catch { return {}; } };
@@ -1172,14 +1177,14 @@ function DashboardInner() {
 
   useEffect(() => {
     const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))];
-    if (symbols.length === 0) return;
+    if (symbols.length === 0 || !initialPriceRefreshDone) return;
 
     const needExt = symbols.filter(sym => stockExtInfo[sym] === undefined);
     if (needExt.length > 0) {
-      // Small delay before starting — Groq is a separate service from the
-      // Yahoo/CORS-proxy pipeline used for prices, so this doesn't compete
-      // for the same resource, but still avoid piling everything onto the
-      // page at the exact same instant.
+      // Small buffer after prices finish — Groq is a separate service from
+      // the Yahoo/CORS-proxy pipeline used for prices, so this doesn't
+      // compete for the same resource, but still avoid piling everything
+      // onto the page at the exact same instant prices finish.
       const t = setTimeout(() => {
         (async () => {
           const cache = loadExtInfoCache();
@@ -1208,21 +1213,20 @@ function DashboardInner() {
           saveExtInfoCache(cache);
           setStockExtInfo(prev => ({ ...prev, ...cache }));
         })();
-      }, 3000);
+      }, 1000);
       return () => clearTimeout(t);
     }
-  }, [stocks.map(s => s.symbol).sort().join(",")]);
+  }, [stocks.map(s => s.symbol).sort().join(","), initialPriceRefreshDone]);
 
   useEffect(() => {
     const symbols = [...new Set(stocks.map(s => s.symbol).filter(Boolean))];
-    if (symbols.length === 0) return;
+    if (symbols.length === 0 || !initialPriceRefreshDone) return;
 
     const needYtd = symbols.filter(sym => stockYtdMap[sym] === undefined);
     if (needYtd.length > 0) {
       // YTD goes through the same Yahoo/CORS-proxy pipeline as live prices —
-      // delay it well behind the price refresh's first pass so it doesn't
-      // compete for that same rate-limited resource right when the page
-      // loads (this was a real contributor to "no live data" popping up).
+      // wait a bit after prices actually finish (not a guessed delay) so it
+      // doesn't compete for that same rate-limited resource.
       const t = setTimeout(() => {
         (async () => {
           const cache = loadYtdCache();
@@ -1235,10 +1239,10 @@ function DashboardInner() {
           saveYtdCache(cache);
           setStockYtdMap(prev => ({ ...prev, ...cache }));
         })();
-      }, 15000);
+      }, 5000);
       return () => clearTimeout(t);
     }
-  }, [stocks.map(s => s.symbol).sort().join(",")]);
+  }, [stocks.map(s => s.symbol).sort().join(","), initialPriceRefreshDone]);
 
   const priceRefreshInFlight = useRef(false);
   const refreshPrices = useCallback(async () => {
@@ -1292,7 +1296,7 @@ function DashboardInner() {
         await runBatches(missing);
       }
     } catch { }
-    finally { setRefreshing(false); priceRefreshInFlight.current = false; }
+    finally { setRefreshing(false); priceRefreshInFlight.current = false; setInitialPriceRefreshDone(true); }
   }, [stocks]);
 
   // Always kick off one fresh refresh as soon as stocks are loaded — even
