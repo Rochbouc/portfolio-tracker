@@ -942,6 +942,16 @@ function DashboardInner() {
   const [showAddDiv, setShowAddDiv] = useState(false);
   const [editingStock, setEditingStock] = useState(null);
   const [expandedStock, setExpandedStock] = useState(null);
+  // While a stock's detail panel is open, background batch fetchers (price
+  // refresh, sector/forecast, YTD, dividend refresh) pause between batches
+  // instead of continuing to compete for the same rate-limited proxy — so
+  // clicking a stock actually gets priority, not just "no artificial delay
+  // in the code" while still standing in line behind background traffic.
+  const backgroundFetchPaused = useRef(false);
+  useEffect(() => { backgroundFetchPaused.current = !!expandedStock; }, [expandedStock]);
+  async function waitWhilePaused() {
+    while (backgroundFetchPaused.current) await new Promise(res => setTimeout(res, 200));
+  }
   const [holdingSearch, setHoldingSearch] = useState("");
   const [expandedAccount, setExpandedAccount] = useState({});
   const [accountCurrency, setAccountCurrency] = useState({});
@@ -1187,6 +1197,7 @@ function DashboardInner() {
         (async () => {
           const cache = loadExtInfoCache();
           for (let i = 0; i < needExt.length; i += 2) {
+            await waitWhilePaused();
             const batch = needExt.slice(i, i + 2);
             const results = await Promise.allSettled(batch.map(async sym => {
               const stock = stocks.find(s => s.symbol === sym) || {};
@@ -1229,6 +1240,7 @@ function DashboardInner() {
         (async () => {
           const cache = loadYtdCache();
           for (let i = 0; i < needYtd.length; i += 3) {
+            await waitWhilePaused();
             const batch = needYtd.slice(i, i + 3);
             const results = await Promise.allSettled(batch.map(async sym => [sym, await fetchQuoteYTD(sym, stocks.find(s => s.symbol === sym) || {})]));
             results.forEach(r => { if (r.status === "fulfilled") cache[r.value[0]] = r.value[1] ?? null; });
@@ -1273,6 +1285,7 @@ function DashboardInner() {
       const batchSize = 12, delayMs = 150;
       async function runBatches(symbolList) {
         for (let i = 0; i < symbolList.length; i += batchSize) {
+          await waitWhilePaused();
           const batch = symbolList.slice(i, i + batchSize);
           const results = await Promise.allSettled(batch.map(async sym => {
             const stock = stocks.find(s => s.symbol === sym);
