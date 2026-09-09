@@ -6,6 +6,7 @@
  */
 
 const PROXIES = [
+  "https://portfolio-tracker-proxy.boucher-roch.workers.dev/?url=",
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy/?quest=",
   "https://corsproxy.io/?url=",
