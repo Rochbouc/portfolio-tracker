@@ -1065,6 +1065,24 @@ function DashboardInner() {
       }
     }
 
+    // Immediately backfill the PAY SCHEDULE (day/months/day-of-week) for
+    // any stock that has neither a hardcoded reference entry nor a live-
+    // cached one yet — e.g. a stock you just added, or an ETF not in the
+    // reference table. Without this, a new stock's schedule would only
+    // ever get filled in by the once-a-month global refresh, meaning it
+    // could silently be missing from the calendar and auto-dividend
+    // suggestions for weeks. Fire-and-forget (doesn't block the page) and
+    // self-limiting — once a stock has real schedule data, this stops
+    // touching it, so it's safe to run on every load.
+    const needsSchedule = s.filter(st => {
+      if (!(parseFloat(st.shares) > 0)) return false;
+      const sched = getPaySchedule(st.symbol);
+      return !sched.payDay && !sched.payMonths && !sched.payDow;
+    });
+    if (needsSchedule.length > 0) {
+      refreshDividendScheduleCache(needsSchedule).catch(() => {});
+    }
+
     // Auto-clear implausible annual_dividend values — data providers
     // occasionally return garbage dividend figures for illiquid microcaps
     // and penny stocks (seen in practice: a $0.03 CNSX stock stored with a
