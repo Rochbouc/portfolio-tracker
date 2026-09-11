@@ -224,8 +224,13 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
       const data = await res.json()
       if (data.error) throw new Error(data.error.message)
       const text  = data.choices?.[0]?.message?.content || ""
-      const clean = text.replace(/```json|```/g,"").trim()
-      const parsed = JSON.parse(clean)
+      // Extract just the {...} portion rather than assuming the whole
+      // response is pure JSON — Groq sometimes prepends an apology/
+      // disclaimer sentence before the actual JSON, which breaks a direct
+      // JSON.parse on the full text.
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) throw new Error("The AI didn't return usable data this time — try again")
+      const parsed = JSON.parse(jsonMatch[0])
       setTopUS(parsed.us || [])
       setTopCA(parsed.ca || [])
       setLastFetched(new Date().toLocaleTimeString())

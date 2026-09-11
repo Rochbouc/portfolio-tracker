@@ -32,6 +32,7 @@ import DividendCalendar from "@/components/dividends/DividendCalendar";
 import CashModal from "@/components/portfolio/CashModal";
 import ImportStocks from "@/components/settings/ImportStocks";
 import TFSATracker from "@/components/settings/TFSATracker";
+import LoanTracker from "@/components/settings/LoanTracker";
 import YearOverYear from "@/components/analytics/YearOverYear";
 import HistoricalDividends from "@/components/analytics/HistoricalDividends";
 import ProjectionAt60 from "@/components/analytics/ProjectionAt60";
@@ -2248,12 +2249,14 @@ function DashboardInner() {
                   <WidgetGrid tabId="settings" defaultWidgets={[
                     { id:"fx",     title:"Exchange Rate",             defaultSize:"half" },
                     { id:"tfsa",   title:"TFSA Contribution Room",    defaultSize:"half" },
+                    { id:"loans",  title:"Margin & Loans",            defaultSize:"half" },
                     { id:"import", title:"Import Stocks",             defaultSize:"half" },
                     { id:"backup", title:"Data Backup",               defaultSize:"full" },
                   ]} renderWidget={w => (
                     <Widget key={w.id} id={w.id} title={w.title} tabId="settings" defaultSize={w.defaultSize}>
                       {w.id === "fx" && <ExchangeRateWidget />}
                       {w.id === "tfsa"   && <TFSATracker transactions={transactions} stocks={stocks} />}
+                      {w.id === "loans"  && <LoanTracker stocks={stocks} />}
                       {w.id === "import" && <ImportStocks onImported={() => loadAll()} />}
                       {w.id === "backup" && <DataBackup onRestored={loadAll} stocks={stocks} prices={prices} />}
                     </Widget>

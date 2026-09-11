@@ -159,6 +159,7 @@ const SIMPLE_SYNCED_KEYS = [
   "proj60_accounts_v3", "proj60_settings_v1", "tfsa_tracker_v1",
   "contribution_tracking", "dividend_archive", "dismissed_div_suggestions",
   "dividend_schedule_cache_v2", "dividend_data_last_refresh_v2",
+  "loan_tracker_v1",
 ]
 // Keys stored as a raw string in localStorage (not JSON) — everything else
 // in SIMPLE_SYNCED_KEYS is JSON (array/object).
