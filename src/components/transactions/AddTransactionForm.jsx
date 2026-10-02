@@ -75,7 +75,8 @@ export default function AddTransactionForm({ open, onOpenChange, onSubmit, stock
                   : stocks.map(s => (
                     <SelectItem key={s.id} value={s.id}>
                       <span className="font-semibold">{s.symbol}</span>
-                      <span className="text-gray-400 ml-1.5">— {s.name}</span>
+                      {s.account_type && <span className="text-blue-600 font-medium ml-1.5">[{s.account_type}]</span>}
+                      <span className="text-gray-400 ml-1.5">— {s.name} · {s.shares} sh</span>
                     </SelectItem>
                   ))
                 }
@@ -84,21 +85,16 @@ export default function AddTransactionForm({ open, onOpenChange, onSubmit, stock
             {errors.stock_id && <p className="text-xs text-red-500">{errors.stock_id.message}</p>}
           </div>
 
-          {/* Account Type */}
+          {/* Account Type — always reflects the selected stock's actual account.
+              Not independently editable: letting it diverge from the stock
+              you picked is exactly what caused a transaction to be saved
+              against the wrong position while displaying the account you
+              intended, silently corrupting the wrong side. */}
           <div className="space-y-1.5">
             <Label className="text-gray-700 font-medium">Account</Label>
-            <Select
-              value={watch("account_type") || ""}
-              onValueChange={v => setValue("account_type", v === "none_selected" ? "" : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select account (auto-filled from stock)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none_selected">— None —</SelectItem>
-                {allAccounts.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center h-10 px-3 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-700">
+              {selectedStock?.account_type || <span className="text-gray-400">Select a stock above first</span>}
+            </div>
           </div>
 
           {/* Type + Date */}

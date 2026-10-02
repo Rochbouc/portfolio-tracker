@@ -1587,8 +1587,18 @@ function DashboardInner() {
   };
   const handleEditStock = (stock) => { setEditingStock(stock); setShowAddStock(true); };
   const handleAddTransaction = async (data) => {
-    await Transaction.create(data);
     const stock = stocks.find(s => s.id === data.stock_id);
+    // Warn before a sell would exceed what's actually held in that specific
+    // position — this is exactly how a transaction meant for one account
+    // (e.g. RRSP) can silently wipe out a same-symbol position in a
+    // different account (e.g. TFSA) if the wrong one got selected.
+    if (stock && data.type === "sell" && data.shares > (stock.shares || 0) + 0.0001) {
+      const proceed = confirm(
+        `You're selling ${data.shares} shares of ${stock.symbol} (${stock.account_type || "no account set"}), but that position only holds ${stock.shares} shares.\n\nIf you meant a different account holding the same stock, cancel and re-check which one is selected.\n\nContinue anyway?`
+      );
+      if (!proceed) return;
+    }
+    await Transaction.create(data);
     if (stock) {
       const txValue = parseFloat((data.shares * data.price).toFixed(2));
       const acct    = data.account_type || stock.account_type || "Unassigned";
