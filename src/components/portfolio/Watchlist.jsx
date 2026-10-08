@@ -217,7 +217,13 @@ export default function Watchlist({ stocks = [], prices = {}, dividends = [], gl
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
         body: JSON.stringify({
           model: "openai/gpt-oss-20b",
-          max_tokens: 1200,
+          max_tokens: 2000,
+          // gpt-oss-20b is a reasoning model — without this it can spend its
+          // whole token budget on internal "thinking" and never actually
+          // emit the requested JSON. Low effort keeps it fast and leaves
+          // the budget for the actual answer. (Must be low/medium/high —
+          // omitting it or passing "default" errors on this model.)
+          reasoning_effort: "low",
           messages: [{ role: "user", content: prompt }]
         })
       })

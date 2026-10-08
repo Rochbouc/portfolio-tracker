@@ -33,7 +33,12 @@ export async function fetchGroqAnalystEstimate(symbol, name, price, week52Low, w
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
       body: JSON.stringify({
         model: "openai/gpt-oss-20b",
-        max_tokens: 200,
+        max_tokens: 500,
+        // gpt-oss-20b is a reasoning model — without this it can spend its
+        // whole token budget on internal "thinking" and never actually
+        // emit the requested JSON, especially with a tight budget like
+        // this one. Low effort keeps it fast and leaves room for the answer.
+        reasoning_effort: "low",
         temperature: 0.3,
         messages: [{
           role: "system",

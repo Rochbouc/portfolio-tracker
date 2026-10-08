@@ -513,7 +513,7 @@ function GroqKeyPrompt({ onSaved }) {
   );
 }
 
-async function callGroq(system, userMessage, history = [], maxTokens = 800) {
+async function callGroq(system, userMessage, history = [], maxTokens = 800, reasoningEffort = "low") {
   const key = getGroqKey();
   if (!key) throw new Error("NO_KEY");
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -525,6 +525,11 @@ async function callGroq(system, userMessage, history = [], maxTokens = 800) {
     body: JSON.stringify({
       model: "openai/gpt-oss-20b",   // free, fast Groq model
       max_tokens: maxTokens,
+      // gpt-oss-20b is a reasoning model — without this it can spend its
+      // whole token budget on internal "thinking" and never actually
+      // produce a visible reply. "low" keeps quick Q&A fast and reliable;
+      // callers doing more complex analysis can pass "medium"/"high".
+      reasoning_effort: reasoningEffort,
       temperature: 0.7,
       messages: [
         { role: "system", content: system },
@@ -703,7 +708,7 @@ function AIAssistantPanel() {
   // it can't actually pull real-time Reddit/StockTwits/analyst data. The
   // system prompt below tells it to be upfront about that instead of
   // inventing specific "trending today" claims it can't verify.
-  const runAggressiveGrowthScreen = () => send(AGGRESSIVE_GROWTH_PROMPT, { maxTokens: 3500, skipLiveContext: true });
+  const runAggressiveGrowthScreen = () => send(AGGRESSIVE_GROWTH_PROMPT, { maxTokens: 3500, skipLiveContext: true, reasoningEffort: "medium" });
 
   const send = async (text, opts = {}) => {
     const q = (text || input).trim();
@@ -724,7 +729,7 @@ function AIAssistantPanel() {
       }
       const today = new Date().toLocaleDateString("en-CA");
       const systemPrompt = `You are a stock market assistant for US (NYSE/NASDAQ) and Canadian (TSX/TSX-V) markets. Today is ${today}.${liveCtx ? `\n\nLive market data fetched right now:\n${liveCtx}\n\nUse these exact numbers when discussing these stocks.` : ""}\nBe concise and specific. Always note this is not financial advice.`;
-      const reply = await callGroq(systemPrompt, q, histRef.current.slice(0, -1), opts.maxTokens || 800);
+      const reply = await callGroq(systemPrompt, q, histRef.current.slice(0, -1), opts.maxTokens || 800, opts.reasoningEffort || "low");
       histRef.current = [...histRef.current, { role: "assistant", content: reply }];
       setMsgs(m => [...m, { role: "assistant", text: reply }]);
     } catch (err) {
