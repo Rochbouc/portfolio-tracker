@@ -6,7 +6,10 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { TrendingUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const COLORS = { "Total Portfolio":"#3b82f6", RRSP:"#10b981", TFSA:"#f59e0b", Margin:"#8b5cf6" }
+const COLORS = {
+  "Total Portfolio":"#3b82f6", RRSP:"#10b981", TFSA:"#f59e0b", Margin:"#8b5cf6",
+  FHSA:"#06b6d4", "Non-Registered":"#ef4444", "Non-Reg":"#ef4444", "Non Registered":"#ef4444", Cash:"#64748b",
+}
 
 function fmtLarge(n) {
   if (n == null) return "-"
@@ -106,10 +109,27 @@ export default function PortfolioPerformanceChart({
       txByStock[sid].push(tx)
     })
 
-    // Compute shares held at each date
+    // Compute shares held at each date.
+    // Positions added directly (Add Stock / Import) often have NO buy
+    // transactions at all - e.g. Non-Registered and Margin accounts - so
+    // summing transactions alone gives 0 shares on every date and the
+    // account shows $0 in the chart and tooltip. To handle that, treat any
+    // shares the transactions don't explain as an "opening" balance held
+    // throughout the range: opening = current shares - net of all
+    // transactions. For positions fully built from transactions this is 0,
+    // so their behaviour is unchanged; for direct-entry positions it's the
+    // whole share count; and "today" always equals the real current shares.
+    const stockById = {}
+    stocks.forEach(s => { stockById[s.id] = s })
+    const netAllByStock = {}
+    Object.entries(txByStock).forEach(([sid, txs]) => {
+      netAllByStock[sid] = txs.reduce((n, tx) =>
+        n + (tx.type === "buy" ? (tx.shares || 0) : tx.type === "sell" ? -(tx.shares || 0) : 0), 0)
+    })
     function sharesAtDate(stockId, date) {
       const txs = txByStock[stockId] || []
-      let shares = 0
+      const opening = (stockById[stockId]?.shares || 0) - (netAllByStock[stockId] || 0)
+      let shares = opening
       txs.forEach(tx => {
         if (new Date(tx.date) <= date) {
           if (tx.type === "buy")  shares += tx.shares || 0
